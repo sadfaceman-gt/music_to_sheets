@@ -1,0 +1,5 @@
+notes/
+test/
+node_modules/
+*.onnx
+DESIGN.md

@@ -1,0 +1,12 @@
+{
+  "name": "stem-test",
+  "private": true,
+  "type": "module",
+  "description": "Runs the browser HT-Demucs ONNX pipeline (demucs-web) under Node to test stem separation locally.",
+  "scripts": { "separate": "node separate.mjs" },
+  "dependencies": {
+    "demucs-web": "1.0.2",
+    "mpg123-decoder": "*",
+    "onnxruntime-node": "*"
+  }
+}
