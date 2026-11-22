@@ -2,6 +2,10 @@
 notes/
 test/
 DESIGN.md
+DEVELOPMENT.md
+CLAUDE.md
+.agents/*
+.claude/*
 *.onnx
 
 # Build and tooling
