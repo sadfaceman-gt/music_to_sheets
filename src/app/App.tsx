@@ -1,4 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { AudioSession } from './audioSession.ts';
+import { FirstRun } from './FirstRun.tsx';
+import { firstRunDone } from './firstRunFlag.ts';
 import { parseGameProfile } from '../core/profile/schema.ts';
 import type { GameProfile } from '../core/profile/schema.ts';
 import { Editor } from '../editor/Editor.tsx';
@@ -37,6 +40,13 @@ export function App() {
     }
   };
 
+  const [showFirstRun, setShowFirstRun] = useState(() => !firstRunDone());
+  const profile = load.state === 'ready' ? load.profile : null;
+  const session = useMemo(() => (profile ? new AudioSession(profile) : null), [profile]);
+  useEffect(() => {
+    void session?.init();
+  }, [session]);
+
   useEffect(() => {
     let cancelled = false;
     loadProfile().then(
@@ -73,12 +83,12 @@ export function App() {
           <p className="mt-2 text-sm text-slate-400">Reload the page to try again.</p>
         </div>
       )}
-      {load.state === 'ready' && <Editor profile={load.profile} rowColors={rowColors} />}
+      {load.state === 'ready' && session && (showFirstRun ? <FirstRun session={session} onDone={() => setShowFirstRun(false)} /> : <Editor profile={load.profile} session={session} rowColors={rowColors} />)}
       <footer className="border-t border-slate-800 px-3 py-1 text-xs text-slate-500">
         Unofficial fan tool, not affiliated with or endorsed by Ubisoft. Growtopia is a trademark of its owner. Your audio
         stays on your device.
       </footer>
-      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} rowColors={rowColors} onRowColors={chooseRowColors} />}
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} rowColors={rowColors} onRowColors={chooseRowColors} session={session} />}
     </div>
   );
 }

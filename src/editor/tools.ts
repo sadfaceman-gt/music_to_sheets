@@ -2,7 +2,7 @@ import type { GameProfile } from '../core/profile/schema.ts';
 import { midiOf } from '../core/sheet/spelling.ts';
 import type { CellPos, Sheet } from '../core/sheet/types.ts';
 
-export type ToolId = 'paint' | 'erase' | 'select' | 'gear';
+export type ToolId = 'paint' | 'erase' | 'select' | 'gear' | 'audition';
 
 export interface ToolInfo {
   id: ToolId;
@@ -18,6 +18,7 @@ export const TOOLS: readonly ToolInfo[] = [
   { id: 'erase', label: 'Erase', cursor: 'cell' },
   { id: 'select', label: 'Select', cursor: 'default' },
   { id: 'gear', label: 'Gear editor', cursor: 'pointer' },
+  { id: 'audition', label: 'Audition', cursor: 'pointer' },
 ];
 
 /** Every cell on the straight line from a to b, both ends included (Bresenham), so a fast drag leaves no gaps. */

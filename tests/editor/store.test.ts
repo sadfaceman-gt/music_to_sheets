@@ -305,4 +305,31 @@ describe('setColumns', () => {
     st().setTimeSignature(5, 2, 4); // not a measure bar: nothing changes
     expect(st().undoDepth).toBe(2);
   });
+
+  it('a world BPM change is one undo step; an unchanged or invalid value adds none', () => {
+    const store = createEditorStore(profile, 16);
+    const st = () => store.getState();
+    st().setWorldBpm(140);
+    expect(st().sheet.worldBpm).toBe(140);
+    expect(st().undoDepth).toBe(1);
+    st().setWorldBpm(140);
+    st().setWorldBpm(Number.NaN);
+    expect(st().undoDepth).toBe(1);
+    st().undo();
+    expect(st().sheet.worldBpm).toBe(profile.timing.bpmDefault);
+    st().redo();
+    expect(st().sheet.worldBpm).toBe(140);
+  });
+
+  it('the world BPM is rounded to an integer and kept inside the profile range', () => {
+    const store = createEditorStore(profile, 16);
+    const st = () => store.getState();
+    st().setWorldBpm(120.6);
+    expect(st().sheet.worldBpm).toBe(121);
+    st().setWorldBpm(profile.timing.bpmMax + 50);
+    expect(st().sheet.worldBpm).toBe(profile.timing.bpmMax);
+    expect(st().lastReport[0]).toContain(String(profile.timing.bpmMax));
+    st().setWorldBpm(1);
+    expect(st().sheet.worldBpm).toBe(profile.timing.bpmMin);
+  });
 });

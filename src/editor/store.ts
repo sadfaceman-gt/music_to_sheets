@@ -44,6 +44,8 @@ export interface EditorActions {
   setColumns(cols: number): void;
   /** Sets the time signature from the measure bar at `col` onward (T19); one undo step. */
   setTimeSignature(col: number, n: number, m: number): void;
+  /** Sets the world BPM (rounded to an integer, clamped to the profile's range); one undo step, none when unchanged. */
+  setWorldBpm(bpm: number): void;
   /**
    * Starts a batch: every edit until endBatch() shows up immediately but becomes one undo step (a paint drag).
    * Undo and redo are ignored while a batch is open. Starting a batch while one is open ends the old one first.
@@ -251,6 +253,20 @@ export function createEditorStore(profile: GameProfile, cols?: number): EditorSt
 
       setTimeSignature(col, n, m) {
         run('Time signature', (draft) => setSignature(draft, col, n, m));
+      },
+
+      setWorldBpm(bpm) {
+        if (!Number.isFinite(bpm)) {
+          set({ lastReport: ['The BPM must be a number'] });
+          return;
+        }
+        const { bpmMin, bpmMax } = get().profile.timing;
+        const target = Math.min(bpmMax, Math.max(bpmMin, Math.round(bpm)));
+        run('World BPM', (draft) => {
+          const changed = draft.worldBpm === target ? 0 : 1;
+          draft.worldBpm = target;
+          return { changed, messages: target === bpm ? [] : [`BPM set to ${target} (the game allows ${bpmMin} to ${bpmMax})`] };
+        });
       },
 
       beginBatch(label) {

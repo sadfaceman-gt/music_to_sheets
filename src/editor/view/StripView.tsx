@@ -48,6 +48,11 @@ export interface StripViewProps {
   onBarSelect?: (col: number | null) => void;
   onCellPointer?: (e: CellPointerEvent) => void;
   onViewportChange?: (vp: Viewport) => void;
+  /** The player's block images by block kind id; drawn instead of the original icons (M1b). */
+  icons?: ReadonlyMap<string, ImageBitmap>;
+  /** Column under the playhead (null = none), and whether the view scrolls to keep it visible. */
+  playhead?: number | null;
+  follow?: boolean;
 }
 
 const MINIMAP_H = 44;
@@ -69,7 +74,7 @@ function fitCanvas(canvas: HTMLCanvasElement, w: number, h: number, dpr: number)
   return canvas.getContext('2d');
 }
 
-export function StripView({ profile, sheet, selection, cursor, rowColors, ghost, selectedBar, onBarSelect, onCellPointer, onViewportChange }: StripViewProps) {
+export function StripView({ profile, sheet, selection, cursor, rowColors, ghost, selectedBar, onBarSelect, onCellPointer, onViewportChange, icons, playhead, follow }: StripViewProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const miniRef = useRef<HTMLCanvasElement>(null);
@@ -134,13 +139,19 @@ export function StripView({ profile, sheet, selection, cursor, rowColors, ghost,
       const dpr = window.devicePixelRatio || 1;
       const canvas = canvasRef.current;
       const ctx = canvas && fitCanvas(canvas, size.w, size.h, dpr);
-      if (ctx) draw(ctx, { profile, sheet, viewport: vp, selection, hover, width: size.w, height: size.h, dpr, rowBands: rowBands(rowColors ?? DEFAULT_ROW_COLOR_PROFILE, sheet.rows), ghost, selectedBar });
+      if (ctx) draw(ctx, { profile, sheet, viewport: vp, selection, hover, width: size.w, height: size.h, dpr, rowBands: rowBands(rowColors ?? DEFAULT_ROW_COLOR_PROFILE, sheet.rows), ghost, selectedBar, icons, playhead });
       const mini = miniRef.current;
       const mctx = mini && fitCanvas(mini, size.w, MINIMAP_H, dpr);
-      if (mctx) drawMinimap(mctx, { profile, sheet, viewport: vp, mainWidth: size.w, width: size.w, height: MINIMAP_H, dpr });
+      if (mctx) drawMinimap(mctx, { profile, sheet, viewport: vp, mainWidth: size.w, width: size.w, height: MINIMAP_H, dpr, playhead });
     });
     return () => cancelAnimationFrame(id);
-  }, [profile, sheet, selection, hover, vp, size, rowColors, ghost, selectedBar]);
+  }, [profile, sheet, selection, hover, vp, size, rowColors, ghost, selectedBar, icons, playhead]);
+
+  // Follow: keep the playhead column in view (scrolls only when it leaves the screen).
+  useEffect(() => {
+    if (!follow || playhead == null) return;
+    updateVp((v) => scrollToCol(v, playhead, latest.current.size.w));
+  }, [follow, playhead, updateVp]);
 
   // Wheel: scroll, or zoom with Ctrl/Cmd. Needs a non-passive listener to preventDefault.
   useEffect(() => {
