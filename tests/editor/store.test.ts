@@ -241,3 +241,31 @@ describe('undo/redo property', () => {
     );
   });
 });
+
+describe('setColumns', () => {
+  it('grows past the world limit as one undo step, and undoes', () => {
+    const s = createEditorStore(profile);
+    const world = profile.grid.worldCols;
+    s.getState().setColumns(world + 50);
+    expect(s.getState().sheet.cols).toBe(world + 50);
+    expect(s.getState().undoDepth).toBe(1);
+    s.getState().undo();
+    expect(s.getState().sheet.cols).toBe(world);
+  });
+  it('refuses to cut off a used column and invalid counts, with a message', () => {
+    const s = createEditorStore(profile);
+    s.getState().paint({ col: 10, row: 3 });
+    s.getState().setColumns(10);
+    expect(s.getState().sheet.cols).toBe(profile.grid.worldCols);
+    expect(s.getState().lastReport[0]).toMatch(/column 10 is in use/);
+    s.getState().setColumns(0);
+    expect(s.getState().lastReport[0]).toMatch(/at least 1/);
+    s.getState().setColumns(11);
+    expect(s.getState().sheet.cols).toBe(11);
+  });
+  it('adds no step when the count is unchanged', () => {
+    const s = createEditorStore(profile);
+    s.getState().setColumns(profile.grid.worldCols);
+    expect(s.getState().undoDepth).toBe(0);
+  });
+});

@@ -39,6 +39,8 @@ export interface EditorActions {
   swapInstrument(instrument: string): void;
   setVolume(volume: number): void;
   setGear(pos: CellPos, gear: GearBlock | null): void;
+  /** Sets the sheet's column count (one undo step). Refused below the last used column; may exceed the world limit. */
+  setColumns(cols: number): void;
   /**
    * Starts a batch: every edit until endBatch() shows up immediately but becomes one undo step (a paint drag).
    * Undo and redo are ignored while a batch is open. Starting a batch while one is open ends the old one first.
@@ -221,6 +223,26 @@ export function createEditorStore(profile: GameProfile, cols?: number): EditorSt
 
       setGear(pos, gear) {
         run('Gear', (sheet, p) => edit.setGear(p, sheet, pos, gear));
+      },
+
+      setColumns(cols) {
+        const target = Math.floor(cols);
+        const { sheet } = get();
+        if (!Number.isFinite(target) || target < 1) {
+          set({ lastReport: ['Columns must be a whole number of at least 1'] });
+          return;
+        }
+        let lastUsed = -1;
+        for (const key of Object.keys(sheet.cells)) lastUsed = Math.max(lastUsed, Number(key.split(',')[0]));
+        if (target <= lastUsed) {
+          set({ lastReport: [`Can't shrink to ${target} columns: column ${lastUsed} is in use`] });
+          return;
+        }
+        run('Columns', (draft) => {
+          const changed = draft.cols === target ? 0 : 1;
+          draft.cols = target;
+          return { changed, messages: [] };
+        });
       },
 
       beginBatch(label) {

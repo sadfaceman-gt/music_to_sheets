@@ -232,7 +232,7 @@ export function Editor({ profile }: { profile: GameProfile }) {
           />
         )}
       </div>
-      <StatusBar profile={profile} sheet={sheet} hover={hover} report={report} />
+      <StatusBar profile={profile} sheet={sheet} hover={hover} report={report} onSetColumns={(n) => store.getState().setColumns(n)} />
     </div>
   );
 }

@@ -271,3 +271,16 @@ test('the Settings panel shows cross-origin isolation as supported', async ({ pa
   await page.getByTestId('settings-close').click();
   await expect(panel).toBeHidden();
 });
+
+test('the sheet can grow past the world limit, which shows the world-unsupported warning', async ({ page }) => {
+  const world = await page.evaluate(() => Object.keys((globalThis as unknown as Hooks).__mtsTest!.getSheet().cells).length);
+  expect(world).toBe(0);
+  const input = page.getByTestId('status-cols-input');
+  const start = Number(await input.inputValue());
+  await expect(page.getByTestId('status-world-warning')).toHaveCount(0);
+  await input.fill(String(start + 20));
+  await input.press('Enter');
+  await expect(page.getByTestId('status-world-warning')).toContainText('20 columns past');
+  await click(page, start + 10, 5);
+  expect((await cell(page, start + 10, 5))?.block).toBeTruthy();
+});
