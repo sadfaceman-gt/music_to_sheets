@@ -35,7 +35,10 @@ for (const file of files(join(root, 'src'))) {
   const rel = relative(root, file);
   if (rel.startsWith('src/core/profile/')) continue;
   readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
-    const code = line.replace(/\/\/.*$/, '').replace(/^\s*\*.*$/, ''); // ignore comments
+    const code = line
+      .replace(/\/\/.*$/, '')
+      .replace(/^\s*\*.*$/, '') // ignore comments
+      .replace(/(rgba?|hsla?)\([^)]*\)/g, ''); // and colour values
     for (const c of checks) if (c.re.test(code)) hits.push(`${rel}:${i + 1}  ${c.name}: ${line.trim()}`);
   });
 }

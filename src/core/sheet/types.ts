@@ -11,7 +11,7 @@ export type Accidental = 'natural' | 'sharp' | 'flat';
 /** A native sheet-music block on a row. The row gives the letter; the block gives instrument + accidental. */
 export interface NoteBlock {
   type: 'note';
-  /** Key into profile.instruments, e.g. the id of the Piano entry. */
+  /** Key into profile.instruments. */
   instrument: string;
   accidental: Accidental;
 }
