@@ -15,7 +15,7 @@ const store = (cols = 12) => createEditorStore(profile, cols);
 describe('editor store', () => {
   it('starts empty with the first palette entry selected', () => {
     const st = store().getState();
-    expect(st.sheet).toEqual({ rows: 14, cols: 12, cells: {}, timeSignatures: [{ col: 0, n: 4, m: 4 }] });
+    expect(st.sheet).toEqual({ rows: 14, cols: 12, cells: {}, timeSignatures: [{ col: 0, n: 4, m: 4 }], worldBpm: profile.timing.bpmDefault });
     expect(st.paletteId).toBe(palette[0]?.id);
     expect(st.selection).toBeNull();
     expect(st.canUndo()).toBe(false);

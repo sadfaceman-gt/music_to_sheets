@@ -4,7 +4,7 @@
   "verified": "2026-11-22",
   "grid": { "rows": 14, "pageCols": 100, "pages": 4, "worldCols": 400,
             "bedrock": { "page": 4, "rows": [12, 13] } },
-  "timing": { "colsPerBpmBeat": 4, "bpmMin": 20, "bpmMax": 200, "bpmInteger": true },
+  "timing": { "colsPerBpmBeat": 4, "bpmMin": 20, "bpmMax": 200, "bpmInteger": true, "bpmDefault": 100 },
   "playback": { "windowBlocks": ["note", "blank", "repeatBegin", "repeatEnd", "gear", "rack"],
                "pageWrapGap": 0, "foregroundMutes": false, "polyphonyCap": null },
   "repeats": { "match": "sameNote", "scope": "anyEarlier", "noBegin": "songStart",
@@ -15,6 +15,29 @@
            "textAccidentals": { "natural": "-", "sharp": "#", "flat": "b" } },
   "naturalFiles": { "c": 1, "d": 3, "e": 5, "f": 6, "g": 8, "a": 10, "b": 12,
                     "C": 13, "D": 15, "E": 17, "F": 18, "G": 20, "A": 22, "B": 24 },
+  "sounds": { "extension": "wav", "separator": "_", "prefixOverrides": {} },
+  "blockImages": {
+    "extension": "png",
+    "accidentals": { "sharp": ["sharp"], "flat": ["flat"] },
+    "blocks": {
+      "piano":           { "allOf": ["piano"] },
+      "bass":            { "allOf": ["bass"] },
+      "sax":             { "allOf": ["sax"] },
+      "flute":           { "allOf": ["flute"] },
+      "spanish_guitar":  { "allOf": ["guitar"], "noneOf": ["electric"] },
+      "violin":          { "allOf": ["violin"] },
+      "lyre":            { "allOf": ["lyre"] },
+      "electric_guitar": { "allOf": ["electric"] },
+      "mexican_trumpet": { "allOf": ["trumpet"] },
+      "spooky":          { "allOf": ["spooky"] },
+      "festive":         { "anyOf": ["festive", "winterfest"] },
+      "drum":            { "allOf": ["drum"] },
+      "blank":           { "allOf": ["blank"] },
+      "repeatBegin":     { "allOf": ["repeat"], "anyOf": ["start", "begin"] },
+      "repeatEnd":       { "allOf": ["repeat", "end"] },
+      "gear":            { "anyOf": ["gear", "rack"] }
+    }
+  },
   "instruments": {
     "piano":           { "code": "P", "baseMidi": 59, "accidentals": true, "gmsf": [1, 2, 3] },
     "bass":            { "code": "B", "baseMidi": 47, "accidentals": true, "gmsf": [4, 5, 6] },

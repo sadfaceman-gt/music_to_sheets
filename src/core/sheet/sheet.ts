@@ -5,7 +5,7 @@ import type { Cell, CellRect, GearBlock, Sheet, SheetBlock } from './types.ts';
 
 /** An empty strip: profile.grid.rows rows and `cols` columns (default: the world limit). */
 export function createSheet(profile: GameProfile, cols: number = profile.grid.worldCols): Sheet {
-  return { rows: profile.grid.rows, cols, cells: {}, timeSignatures: defaultTimeSignatures() };
+  return { rows: profile.grid.rows, cols, cells: {}, timeSignatures: defaultTimeSignatures(), worldBpm: profile.timing.bpmDefault };
 }
 
 export function getCell(sheet: Sheet, col: number, row: number): Cell | undefined {

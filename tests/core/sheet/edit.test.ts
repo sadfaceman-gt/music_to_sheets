@@ -55,7 +55,7 @@ function fresh(cols = 20): Sheet {
 describe('sheet basics', () => {
   it('creates an empty strip of profile rows', () => {
     const s = createSheet(profile);
-    expect(s).toEqual({ rows: 14, cols: 400, cells: {}, timeSignatures: [{ col: 0, n: 4, m: 4 }] });
+    expect(s).toEqual({ rows: 14, cols: 400, cells: {}, timeSignatures: [{ col: 0, n: 4, m: 4 }], worldBpm: profile.timing.bpmDefault });
     expect(createSheet(profile, 30).cols).toBe(30);
   });
 

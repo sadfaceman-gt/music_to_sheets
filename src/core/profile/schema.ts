@@ -61,6 +61,8 @@ export const gameProfileSchema = z.strictObject({
     bpmMin: z.int().positive(),
     bpmMax: z.int().positive(),
     bpmInteger: z.boolean(),
+    /** World BPM for a new sheet (an app default; GMSF benchmarks use 75-100). */
+    bpmDefault: z.int().positive(),
   }),
   playback: z.strictObject({
     windowBlocks: z.array(z.enum(['note', 'blank', 'repeatBegin', 'repeatEnd', 'gear', 'rack'])),
@@ -94,6 +96,30 @@ export const gameProfileSchema = z.strictObject({
   naturalFiles: z.strictObject(
     Object.fromEntries(NATURAL_LETTERS.map((l) => [l, fileIndex])) as Record<NaturalLetter, typeof fileIndex>,
   ),
+  /** The player's sound folder: files are <prefix><separator><index>.<extension>, prefix = instrument id unless overridden (Design 12.1). */
+  sounds: z.strictObject({
+    extension: z.string().min(1),
+    separator: z.string(),
+    prefixOverrides: z.record(z.string(), z.string().min(1)),
+  }),
+  /**
+   * Keywords for matching the player's block-image files to block kinds (Design 12.5). Matching is
+   * case-insensitive on the file name: every allOf word, at least one anyOf word (if given), no noneOf word.
+   * Block kinds are instrument ids plus blank, repeatBegin, repeatEnd and gear. An image with an accidentals
+   * word is that variant; one without is the natural.
+   */
+  blockImages: z.strictObject({
+    extension: z.string().min(1),
+    accidentals: z.strictObject({ sharp: z.array(z.string().min(1)), flat: z.array(z.string().min(1)) }),
+    blocks: z.record(
+      z.string(),
+      z.strictObject({
+        allOf: z.array(z.string().min(1)).optional(),
+        anyOf: z.array(z.string().min(1)).optional(),
+        noneOf: z.array(z.string().min(1)).optional(),
+      }),
+    ),
+  }),
   instruments: z.record(z.string().regex(/^[a-z_]+$/), instrumentSchema),
 });
 
