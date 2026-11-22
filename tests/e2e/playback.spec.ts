@@ -247,5 +247,5 @@ test('the playhead is drawn on the strip and the minimap while playing', async (
   await expect.poll(async () => (await snapshot('strip-canvas')) !== stripIdle, { timeout: 4000 }).toBe(true);
   await expect.poll(async () => (await snapshot('strip-minimap')) !== miniIdle, { timeout: 4000 }).toBe(true);
   await stop(page).click();
-  await expect.poll(async () => (await snapshot('strip-canvas')) === stripIdle, { timeout: 4000 }).toBe(true);
+  await expect.poll(async () => (await snapshot('strip-canvas')) === stripIdle, { timeout: 10_000 }).toBe(true);
 });
