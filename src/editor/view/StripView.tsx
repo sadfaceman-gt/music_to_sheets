@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { GameProfile } from '../../core/profile/schema.ts';
+import { barsInRange } from '../../core/sheet/timeSig.ts';
 import type { Cell, CellPos, CellRect, Sheet } from '../../core/sheet/types.ts';
 import { draw, drawMinimap } from './draw.ts';
 import { DEFAULT_ROW_COLOR_PROFILE, rowBands } from './rowColors.ts';
@@ -8,6 +9,9 @@ import {
   cellAt,
   cellAtClamped,
   cellOrigin,
+  GUTTER_W,
+  HEADER_H,
+  SIG_ROW_H,
   clampScroll,
   DEFAULT_VIEWPORT,
   minimapCols,
@@ -39,6 +43,9 @@ export interface StripViewProps {
   rowColors?: string;
   /** Faint preview of what a click paints, drawn at the hovered cell. */
   ghost?: Cell | null;
+  /** The measure bar picked for a time signature change, and the click on the header numbers that picks one (T19). */
+  selectedBar?: number | null;
+  onBarSelect?: (col: number | null) => void;
   onCellPointer?: (e: CellPointerEvent) => void;
   onViewportChange?: (vp: Viewport) => void;
 }
@@ -62,7 +69,7 @@ function fitCanvas(canvas: HTMLCanvasElement, w: number, h: number, dpr: number)
   return canvas.getContext('2d');
 }
 
-export function StripView({ profile, sheet, selection, cursor, rowColors, ghost, onCellPointer, onViewportChange }: StripViewProps) {
+export function StripView({ profile, sheet, selection, cursor, rowColors, ghost, selectedBar, onBarSelect, onCellPointer, onViewportChange }: StripViewProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const miniRef = useRef<HTMLCanvasElement>(null);
@@ -73,12 +80,13 @@ export function StripView({ profile, sheet, selection, cursor, rowColors, ghost,
   const [panning, setPanning] = useState(false);
 
   // Latest values for event handlers (written in an effect, never during render).
-  const latest = useRef({ vp, size, sheet, profile, onCellPointer, onViewportChange });
+  const latest = useRef({ vp, size, sheet, profile, onCellPointer, onViewportChange, onBarSelect });
   useLayoutEffect(() => {
     latest.current.size = size;
     latest.current.sheet = sheet;
     latest.current.profile = profile;
     latest.current.onCellPointer = onCellPointer;
+    latest.current.onBarSelect = onBarSelect;
     latest.current.onViewportChange = onViewportChange;
   });
   const drag = useRef<
@@ -126,13 +134,13 @@ export function StripView({ profile, sheet, selection, cursor, rowColors, ghost,
       const dpr = window.devicePixelRatio || 1;
       const canvas = canvasRef.current;
       const ctx = canvas && fitCanvas(canvas, size.w, size.h, dpr);
-      if (ctx) draw(ctx, { profile, sheet, viewport: vp, selection, hover, width: size.w, height: size.h, dpr, rowBands: rowBands(rowColors ?? DEFAULT_ROW_COLOR_PROFILE, sheet.rows), ghost });
+      if (ctx) draw(ctx, { profile, sheet, viewport: vp, selection, hover, width: size.w, height: size.h, dpr, rowBands: rowBands(rowColors ?? DEFAULT_ROW_COLOR_PROFILE, sheet.rows), ghost, selectedBar });
       const mini = miniRef.current;
       const mctx = mini && fitCanvas(mini, size.w, MINIMAP_H, dpr);
       if (mctx) drawMinimap(mctx, { profile, sheet, viewport: vp, mainWidth: size.w, width: size.w, height: MINIMAP_H, dpr });
     });
     return () => cancelAnimationFrame(id);
-  }, [profile, sheet, selection, hover, vp, size, rowColors, ghost]);
+  }, [profile, sheet, selection, hover, vp, size, rowColors, ghost, selectedBar]);
 
   // Wheel: scroll, or zoom with Ctrl/Cmd. Needs a non-passive listener to preventDefault.
   useEffect(() => {
@@ -230,9 +238,22 @@ export function StripView({ profile, sheet, selection, cursor, rowColors, ghost,
       setPanning(true);
       return;
     }
+    const p = local(e);
+    if (e.button === 0 && p.y >= HEADER_H - SIG_ROW_H && p.y < HEADER_H && p.x >= GUTTER_W) {
+      // A click on a measure number picks that bar for a time signature change; elsewhere on the row it clears the pick.
+      const l = latest.current;
+      const from = Math.max(0, Math.floor(l.vp.scrollCol + (p.x - 56 - GUTTER_W) / l.vp.cellSize));
+      const to = Math.ceil(l.vp.scrollCol + (p.x + 6 - GUTTER_W) / l.vp.cellSize);
+      let hit: number | null = null;
+      for (const { col, bar } of barsInRange(l.sheet, from, to)) {
+        const bx = cellOrigin(l.vp, col, 0).x;
+        if (bar.measure !== undefined && bx <= p.x + 6 && col < l.sheet.cols) hit = col;
+      }
+      latest.current.onBarSelect?.(hit);
+      return;
+    }
     e.currentTarget.setPointerCapture(e.pointerId);
     drag.current = { kind: 'cells', pointerId: e.pointerId };
-    const p = local(e);
     emit('down', e, cellAtClamped(latest.current.vp, p.x, p.y, latest.current.sheet));
   };
 

@@ -1,10 +1,11 @@
 /** Canvas 2D drawing of the strip view and its minimap (Design 11.1). Geometry maths lives in viewport.ts. */
 import type { GameProfile } from '../../core/profile/schema.ts';
 import { isBedrock, isPastWorldLimit, pageOf, rowLetters } from '../../core/sheet/rows.ts';
+import { barsInRange, sigLabel, signaturesOf } from '../../core/sheet/timeSig.ts';
 import { cellKey, parseCellKey } from '../../core/sheet/types.ts';
 import type { Cell, CellPos, CellRect, Sheet } from '../../core/sheet/types.ts';
 import { instrumentColors, THEME } from './colors.ts';
-import { cellOrigin, GUTTER_W, HEADER_H, minimapCols, minimapX, viewCols, visibleCols } from './viewport.ts';
+import { cellOrigin, GUTTER_W, HEADER_H, SIG_ROW_H, minimapCols, minimapX, viewCols, visibleCols } from './viewport.ts';
 import type { Viewport } from './viewport.ts';
 
 export interface DrawParams {
@@ -21,6 +22,8 @@ export interface DrawParams {
   rowBands?: (string | null)[];
   /** What a click would paint: drawn faint under the pointer so the Paint tool shows what it will place (T13). */
   ghost?: Cell | null;
+  /** The measure bar picked for a time signature change (T19). */
+  selectedBar?: number | null;
 }
 
 const FONT = 'system-ui, sans-serif';
@@ -87,17 +90,52 @@ export function draw(ctx: CanvasRenderingContext2D, p: DrawParams): void {
     }
     ctx.stroke();
 
-    const beat = profile.timing.colsPerBpmBeat;
+    // Vertical bars by time signature (T19): very thin between every column, thin at each note value, thicker at each
+    // measure, blue where the signature changes. The page lines below are unaffected.
     const page = profile.grid.pageCols;
-    ctx.strokeStyle = THEME.beatLine;
-    ctx.beginPath();
-    for (let col = first; col <= last + 1; col++) {
-      if (col % beat !== 0 || col % page === 0) continue;
-      const x = Math.round(cellOrigin(vp, col, 0).x) + 0.5;
+    const bars = barsInRange(sheet, first, last + 1);
+    const lineAt = (col: number) => Math.round(cellOrigin(vp, col, 0).x) + 0.5;
+    const stroke = (color: string, width: number, pick: (b: (typeof bars)[number]) => boolean) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.beginPath();
+      for (const b of bars) {
+        if (!pick(b) || b.col % page === 0) continue;
+        const x = lineAt(b.col);
+        ctx.moveTo(x, HEADER_H);
+        ctx.lineTo(x, gridBottom);
+      }
+      ctx.stroke();
+    };
+    if (cs >= 8) {
+      ctx.strokeStyle = THEME.colLine;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let col = first; col <= last + 1; col++) {
+        if (col % page === 0) continue;
+        const x = lineAt(col);
+        ctx.moveTo(x, HEADER_H);
+        ctx.lineTo(x, gridBottom);
+      }
+      ctx.stroke();
+    }
+    stroke(THEME.noteValueLine, 1, (b) => b.bar.measure === undefined);
+    stroke(THEME.measureLine, 2, (b) => b.bar.measure !== undefined && !b.bar.change && !b.bar.zeroth);
+    ctx.fillStyle = THEME.sigChangeFill;
+    for (const b of bars) {
+      if (!b.bar.change && !b.bar.zeroth) continue;
+      ctx.fillRect(lineAt(b.col) - 2, HEADER_H, 5, gridBottom - HEADER_H);
+    }
+    stroke(THEME.sigChange, 2, (b) => b.bar.change || b.bar.zeroth);
+    if (p.selectedBar != null && p.selectedBar >= first && p.selectedBar <= last + 1) {
+      ctx.strokeStyle = THEME.barSelected;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      const x = lineAt(p.selectedBar);
       ctx.moveTo(x, HEADER_H);
       ctx.lineTo(x, gridBottom);
+      ctx.stroke();
     }
-    ctx.stroke();
 
     ctx.strokeStyle = THEME.pageLine;
     ctx.lineWidth = 2;
@@ -181,7 +219,7 @@ export function draw(ctx: CanvasRenderingContext2D, p: DrawParams): void {
 function drawHeader(ctx: CanvasRenderingContext2D, p: DrawParams, first: number, last: number): void {
   const { profile, sheet, viewport: vp, width } = p;
   const cs = vp.cellSize;
-  const half = HEADER_H / 2;
+  const half = (HEADER_H - SIG_ROW_H) / 2;
   ctx.save();
   ctx.beginPath();
   ctx.rect(GUTTER_W, 0, width - GUTTER_W, HEADER_H);
@@ -223,10 +261,43 @@ function drawHeader(ctx: CanvasRenderingContext2D, p: DrawParams, first: number,
       const x = cellOrigin(vp, col, 0).x;
       ctx.fillText(String(col), x + 3, half + half / 2);
       const tx = Math.round(x) + 0.5;
-      ctx.moveTo(tx, HEADER_H - 6);
-      ctx.lineTo(tx, HEADER_H);
+      ctx.moveTo(tx, HEADER_H - SIG_ROW_H - 6);
+      ctx.lineTo(tx, HEADER_H - SIG_ROW_H);
     }
     ctx.stroke();
+
+    // Note-value and measure numbers on the bottom header row (T19).
+    const rowTop = HEADER_H - SIG_ROW_H;
+    const midY = rowTop + SIG_ROW_H / 2 + 1;
+    const multi = signaturesOf(sheet).length > 1;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    for (const { col, bar } of barsInRange(sheet, first - 2, last + 1)) {
+      const x = cellOrigin(vp, col, 0).x;
+      if (x < GUTTER_W - 60 || x > width) continue;
+      const isMeasure = bar.measure !== undefined;
+      const blue = bar.change || bar.zeroth;
+      ctx.strokeStyle = blue ? THEME.sigChange : isMeasure ? THEME.measureLine : THEME.noteValueLine;
+      ctx.lineWidth = isMeasure ? 2 : 1;
+      ctx.beginPath();
+      ctx.moveTo(Math.round(x) + 0.5, isMeasure ? rowTop : rowTop + SIG_ROW_H / 2);
+      ctx.lineTo(Math.round(x) + 0.5, HEADER_H);
+      ctx.stroke();
+      if (col === p.selectedBar) {
+        ctx.fillStyle = THEME.barSelected;
+        ctx.fillRect(Math.round(x) - 1, rowTop, 3, SIG_ROW_H);
+      }
+      if (isMeasure) {
+        ctx.font = `bold 12px ${FONT}`;
+        ctx.fillStyle = col === p.selectedBar ? THEME.barSelected : blue ? THEME.sigChange : THEME.text;
+        const text = blue && multi ? `${bar.measure} · ${sigLabel(bar.sig)}` : String(bar.measure);
+        ctx.fillText(text, x + 4, midY);
+      } else if (bar.beat !== undefined && cs * 1 >= 4) {
+        ctx.font = `9px ${FONT}`;
+        ctx.fillStyle = THEME.textDim;
+        ctx.fillText(String(bar.beat), x + 2, midY);
+      }
+    }
 
     // Overflow label.
     if (sheet.cols > profile.grid.worldCols) {
@@ -402,6 +473,19 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, p: MinimapParams): vo
     ctx.fillStyle =
       block?.type === 'note' ? (colors.get(block.instrument) ?? THEME.blank) : block ? THEME.blank : THEME.badgeText;
     ctx.fillRect(minimapX(col, width, total), row * rowH, colW, Math.max(1, rowH - 0.5));
+  }
+
+  const sigs = signaturesOf(sheet);
+  if (sigs.length > 1) {
+    ctx.strokeStyle = THEME.sigChange;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (const s of sigs) {
+      const x = Math.round(minimapX(s.col, width, total)) + 1;
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, height);
+    }
+    ctx.stroke();
   }
 
   ctx.strokeStyle = THEME.worldLine;

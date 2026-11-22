@@ -8,6 +8,7 @@ import * as edit from '../core/sheet/edit.ts';
 import type { Clipboard, EditReport } from '../core/sheet/edit.ts';
 import { paletteEntries } from '../core/sheet/palette.ts';
 import { createSheet } from '../core/sheet/sheet.ts';
+import { setTimeSignature as setSignature } from '../core/sheet/timeSig.ts';
 import type { CellPos, CellRect, GearBlock, Sheet } from '../core/sheet/types.ts';
 
 export interface EditorState {
@@ -41,6 +42,8 @@ export interface EditorActions {
   setGear(pos: CellPos, gear: GearBlock | null): void;
   /** Sets the sheet's column count (one undo step). Refused below the last used column; may exceed the world limit. */
   setColumns(cols: number): void;
+  /** Sets the time signature from the measure bar at `col` onward (T19); one undo step. */
+  setTimeSignature(col: number, n: number, m: number): void;
   /**
    * Starts a batch: every edit until endBatch() shows up immediately but becomes one undo step (a paint drag).
    * Undo and redo are ignored while a batch is open. Starting a batch while one is open ends the old one first.
@@ -244,6 +247,10 @@ export function createEditorStore(profile: GameProfile, cols?: number): EditorSt
           draft.cols = target;
           return { changed, messages: [] };
         });
+      },
+
+      setTimeSignature(col, n, m) {
+        run('Time signature', (draft) => setSignature(draft, col, n, m));
       },
 
       beginBatch(label) {

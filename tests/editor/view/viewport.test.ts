@@ -19,7 +19,7 @@ import {
   type Viewport,
 } from '../../../src/editor/view/viewport';
 
-const sheetOf = (cols: number, rows = 14): Sheet => ({ rows, cols, cells: {} });
+const sheetOf = (cols: number, rows = 14): Sheet => ({ rows, cols, cells: {}, timeSignatures: [] });
 const vpArb = fc.record({
   cellSize: fc.double({ min: MIN_CELL, max: MAX_CELL, noNaN: true }),
   scrollCol: fc.double({ min: 0, max: 5000, noNaN: true }),

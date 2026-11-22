@@ -6,7 +6,9 @@
 import type { CellPos, Sheet } from '../../core/sheet/types.ts';
 
 export const GUTTER_W = 30;
-export const HEADER_H = 36;
+/** Height of the bottom header row that carries the measure and beat numbers (T19). */
+export const SIG_ROW_H = 16;
+export const HEADER_H = 36 + SIG_ROW_H;
 export const MIN_CELL = 6;
 export const MAX_CELL = 48;
 export const DEFAULT_CELL = 24;

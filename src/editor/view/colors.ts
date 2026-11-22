@@ -30,6 +30,13 @@ export const THEME = {
   textDim: '#7d8594',
   gridLine: '#262a32',
   beatLine: '#20242b',
+  /** Time signature bars (T19): between every column, at every note value, at every measure. */
+  colLine: '#1e2128',
+  noteValueLine: '#323843',
+  measureLine: '#6b7585',
+  sigChange: '#3b9bff',
+  sigChangeFill: 'rgba(59, 155, 255, 0.22)',
+  barSelected: '#ffd24a',
   pageLine: '#5a6475',
   bedrock: 'rgba(0, 0, 0, 0.55)',
   bedrockHatch: 'rgba(120, 120, 130, 0.25)',

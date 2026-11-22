@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GameProfile } from '../core/profile/schema.ts';
 import { paletteEntries } from '../core/sheet/palette.ts';
 import { getCell } from '../core/sheet/sheet.ts';
+import { isMeasureBar } from '../core/sheet/timeSig.ts';
 import { normaliseRect, rectContains } from '../core/sheet/types.ts';
 import type { Cell, CellPos, CellRect, GearBlock, SheetBlock } from '../core/sheet/types.ts';
 import { GearEditor } from './GearEditor.tsx';
@@ -139,6 +140,8 @@ export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { pro
 
   const [tool, setTool] = useState<ToolId>('paint');
   const [hover, setHover] = useState<CellPos | null>(null);
+  // The measure bar picked on the header for a time signature change (T19).
+  const [pickedBar, setSelectedBar] = useState<number | null>(null);
   const [gearCell, setGearCell] = useState<{ pos: CellPos; session: number } | null>(null);
   const hoverRef = useRef<CellPos | null>(null);
   const drag = useRef<Drag | null>(null);
@@ -347,6 +350,7 @@ export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { pro
       ? { instrument: entry.paint.block.instrument, accidental: entry.paint.block.accidental }
       : null;
   }, [tool, paletteId, profile]);
+  const selectedBar = pickedBar !== null && isMeasureBar(sheet, pickedBar) ? pickedBar : null;
   const gearInitial = useMemo<Cell['gear']>(
     () => (gearCell ? getCell(sheet, gearCell.pos.col, gearCell.pos.row)?.gear : undefined),
     // Read once per session: later saves must not reset the form being edited.
@@ -386,7 +390,7 @@ export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { pro
       <div className="flex min-h-0 flex-1">
         <Palette profile={profile} selectedId={tool === 'paint' ? paletteId : null} onSelect={selectPalette} bindings={bindings} listeningId={listeningId} onListen={setListening} />
         <div className="min-w-0 flex-1" onPointerLeave={() => updateHover(null)}>
-          <StripView profile={profile} sheet={sheet} selection={selection} cursor={cursor} rowColors={rowColors} ghost={ghost} onCellPointer={onCellPointer} />
+          <StripView profile={profile} sheet={sheet} selection={selection} cursor={cursor} rowColors={rowColors} ghost={ghost} selectedBar={selectedBar} onBarSelect={setSelectedBar} onCellPointer={onCellPointer} />
         </div>
         {gearCell && (
           <GearEditor
@@ -406,7 +410,7 @@ export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { pro
           />
         )}
       </div>
-      <StatusBar profile={profile} sheet={sheet} hover={hover} report={report} onSetColumns={(n) => store.getState().setColumns(n)} />
+      <StatusBar profile={profile} sheet={sheet} hover={hover} report={report} onSetColumns={(n) => store.getState().setColumns(n)} selectedBar={selectedBar} onSetSignature={(c, n, m) => store.getState().setTimeSignature(c, n, m)} />
     </div>
   );
 }

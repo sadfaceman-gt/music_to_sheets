@@ -49,10 +49,21 @@ export interface Cell {
  * A 14 x n strip. `cells` is sparse: only non-empty cells are present, keyed by cellKey(col, row).
  * Plain data (no Maps/classes) so Immer patches and structuredClone work.
  */
+/** A time signature that starts at `col` (T19). Visual only; it never changes the composition. */
+export interface TimeSignatureChange {
+  col: number;
+  /** Beats per measure (the top number), 1 to 64. */
+  n: number;
+  /** Note value of a beat (the bottom number), 1 to 64. */
+  m: number;
+}
+
 export interface Sheet {
   rows: number;
   cols: number;
   cells: Record<string, Cell>;
+  /** Time signature changes, sorted by column; the first is at column 0. */
+  timeSignatures: TimeSignatureChange[];
 }
 
 export interface CellPos {

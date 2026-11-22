@@ -15,7 +15,7 @@ const store = (cols = 12) => createEditorStore(profile, cols);
 describe('editor store', () => {
   it('starts empty with the first palette entry selected', () => {
     const st = store().getState();
-    expect(st.sheet).toEqual({ rows: 14, cols: 12, cells: {} });
+    expect(st.sheet).toEqual({ rows: 14, cols: 12, cells: {}, timeSignatures: [{ col: 0, n: 4, m: 4 }] });
     expect(st.paletteId).toBe(palette[0]?.id);
     expect(st.selection).toBeNull();
     expect(st.canUndo()).toBe(false);
@@ -286,5 +286,23 @@ describe('setColumns', () => {
     const s = createEditorStore(profile);
     s.getState().setColumns(profile.grid.worldCols);
     expect(s.getState().undoDepth).toBe(0);
+  });
+
+  it('time signature changes are one undo step each and never touch the cells (T19)', () => {
+    const store = createEditorStore(profile, 64);
+    const st = () => store.getState();
+    st().setTimeSignature(0, 3, 4);
+    st().setTimeSignature(12, 6, 8);
+    expect(st().sheet.timeSignatures).toEqual([
+      { col: 0, n: 3, m: 4 },
+      { col: 12, n: 6, m: 8 },
+    ]);
+    expect(st().undoDepth).toBe(2);
+    st().undo();
+    expect(st().sheet.timeSignatures).toEqual([{ col: 0, n: 3, m: 4 }]);
+    st().redo();
+    expect(st().sheet.timeSignatures).toHaveLength(2);
+    st().setTimeSignature(5, 2, 4); // not a measure bar: nothing changes
+    expect(st().undoDepth).toBe(2);
   });
 });

@@ -461,3 +461,25 @@ test('T18: notes for the Gear grid come from the left panel, which keeps the edi
   await expect(page.getByTestId('gear-grid-0-2')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('gear-preview')).not.toHaveText('');
 });
+
+test('T19: time signature select changes the bars; a measure number can be picked to change it from there on', async ({ page }) => {
+  await expect(page.getByTestId('sig-select')).toBeEnabled();
+  await page.getByTestId('sig-select').selectOption({ label: '3/4' });
+  expect(await page.evaluate(() => (globalThis as unknown as Hooks).__mtsTest!.getSheet())).toMatchObject({ timeSignatures: [{ col: 0, n: 3, m: 4 }] });
+  // Custom shows two number inputs, clamped to 1..64.
+  await page.getByTestId('sig-select').selectOption('custom');
+  await page.getByTestId('sig-n').fill('100');
+  expect(await page.evaluate(() => (globalThis as unknown as Hooks).__mtsTest!.getSheet())).toMatchObject({ timeSignatures: [{ col: 0, n: 64, m: 4 }] });
+  await page.getByTestId('sig-n').fill('3');
+  // Pick the measure bar at column 12 (3/4 = 12 columns) on the header, then change from there.
+  const p = await point(page, 12, 0);
+  const box = await page.getByTestId('strip-canvas').boundingBox();
+  await page.mouse.click(p.x - 12 + 4 + 8, box!.y + 36 + 8); // just right of the bar, inside the number row
+  await page.getByTestId('sig-select').selectOption({ label: '6/8' });
+  const sheet = await page.evaluate(() => (globalThis as unknown as Hooks).__mtsTest!.getSheet());
+  expect(sheet).toMatchObject({ timeSignatures: [{ col: 0, n: 3, m: 4 }, { col: 12, n: 6, m: 8 }] });
+  // With two signatures the controls are greyed until a bar is picked.
+  await page.mouse.click(box!.x + 400, box!.y + 36 + 8, { button: 'left' });
+  await page.getByTestId('undo').click();
+  await expect(page.getByTestId('undo')).toBeEnabled();
+});

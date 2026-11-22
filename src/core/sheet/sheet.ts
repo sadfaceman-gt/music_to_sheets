@@ -1,10 +1,11 @@
 import type { GameProfile } from '../profile/schema.ts';
+import { defaultTimeSignatures } from './timeSig.ts';
 import { cellKey, parseCellKey } from './types.ts';
 import type { Cell, CellRect, GearBlock, Sheet, SheetBlock } from './types.ts';
 
 /** An empty strip: profile.grid.rows rows and `cols` columns (default: the world limit). */
 export function createSheet(profile: GameProfile, cols: number = profile.grid.worldCols): Sheet {
-  return { rows: profile.grid.rows, cols, cells: {} };
+  return { rows: profile.grid.rows, cols, cells: {}, timeSignatures: defaultTimeSignatures() };
 }
 
 export function getCell(sheet: Sheet, col: number, row: number): Cell | undefined {
