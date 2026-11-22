@@ -331,6 +331,15 @@ export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { pro
     drag.current = null;
   };
 
+  // The Paint tool previews what a click places, faintly, under the pointer (T13).
+  const ghost = useMemo<Cell | null>(() => {
+    if (tool !== 'paint') return null;
+    const entry = paletteEntries(profile).find((x) => x.id === paletteId);
+    if (!entry) return null;
+    if (entry.paint.kind === 'gear') return { gear: { kind: entry.paint.gearKind, notes: [], volume: profile.gear.volume.max } };
+    return { block: { ...entry.paint.block } };
+  }, [tool, paletteId, profile]);
+
   const cursor = TOOLS.find((t) => t.id === tool)?.cursor;
   const gearInitial = useMemo<Cell['gear']>(
     () => (gearCell ? getCell(sheet, gearCell.pos.col, gearCell.pos.row)?.gear : undefined),
@@ -368,7 +377,7 @@ export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { pro
       <div className="flex min-h-0 flex-1">
         <Palette profile={profile} selectedId={paletteId} onSelect={selectPalette} bindings={bindings} listeningId={listeningId} onListen={setListening} />
         <div className="min-w-0 flex-1" onPointerLeave={() => updateHover(null)}>
-          <StripView profile={profile} sheet={sheet} selection={selection} cursor={cursor} rowColors={rowColors} onCellPointer={onCellPointer} />
+          <StripView profile={profile} sheet={sheet} selection={selection} cursor={cursor} rowColors={rowColors} ghost={ghost} onCellPointer={onCellPointer} />
         </div>
         {gearCell && (
           <GearEditor

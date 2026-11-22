@@ -403,7 +403,7 @@ test('T10: right-click a block, press a key to bind it, Escape removes it, the t
 
 test('T9: rows get a colour band that Settings can change', async ({ page }) => {
   await page.getByTestId('settings-button').click();
-  await expect(page.getByTestId('row-colors')).toHaveValue('spectrum');
+  await expect(page.getByTestId('row-colors')).toHaveValue('gmsf');
   await page.getByTestId('row-colors').selectOption('none');
   await page.getByTestId('settings-close').click();
   await expect(page.getByTestId('strip-canvas')).toBeVisible();

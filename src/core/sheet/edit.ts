@@ -21,7 +21,7 @@ import {
 } from './spelling.ts';
 import { gearNoteToken } from './gearText.ts';
 import { cellKey, parseCellKey } from './types.ts';
-import type { Accidental, Cell, CellPos, CellRect, GearBlock, NoteBlock, Sheet } from './types.ts';
+import type { Accidental, Cell, CellPos, CellRect, GearBlock, NoteBlock, Sheet, SheetBlock } from './types.ts';
 
 /**
  * Pure edit functions on a (draft) sheet. Each mutates the sheet it is given, so call them inside an Immer
@@ -46,6 +46,17 @@ const MAX_MESSAGES = 20;
 
 /** Shown when native blocks end up under bedrock: they are kept, and become Audio Racks at export (Design 2.6). */
 export const BEDROCK_NOTICE = 'Blocks under bedrock will be converted to Audio Racks during export';
+/** Spooky and Festive notes and Repeat blocks have no Rack equivalent: they stay, but the sheet can't go to a world (T12). */
+export const BEDROCK_UNSUPPORTED_NOTICE =
+  "Spooky, Festive and Repeat blocks under bedrock can't be converted to Audio Racks: this sheet will be marked world-unsupported at export";
+
+/** The notice for a native block under bedrock, or null when nothing needs saying. */
+function bedrockNotice(profile: GameProfile, block: SheetBlock | undefined): string | null {
+  if (!block) return null;
+  if (block.type === 'repeatBegin' || block.type === 'repeatEnd') return BEDROCK_UNSUPPORTED_NOTICE;
+  if (block.type === 'note' && profile.instruments[block.instrument]?.code === null) return BEDROCK_UNSUPPORTED_NOTICE;
+  return BEDROCK_NOTICE;
+}
 
 /** "col 3, row E" (column 0-based). One place to change if the UI numbers columns differently. */
 export function cellLabel(profile: GameProfile, col: number, row: number): string {
@@ -111,7 +122,7 @@ export function paint(profile: GameProfile, sheet: Sheet, pos: CellPos, entry: P
   if (cellsEqual({ block }, existing?.block ? { block: existing.block } : undefined)) return { changed: 0, messages: [] };
   setBlock(sheet, pos.col, pos.row, { ...block });
   growTo(sheet, pos.col);
-  return { changed: 1, messages: isBedrock(profile, pos.col, pos.row) ? [BEDROCK_NOTICE] : [] };
+  return { changed: 1, messages: isBedrock(profile, pos.col, pos.row) ? [bedrockNotice(profile, block) ?? BEDROCK_NOTICE] : [] };
 }
 
 export function erase(_profile: GameProfile, sheet: Sheet, rect: CellRect): EditReport {
@@ -161,7 +172,10 @@ function planPaste(
       problems.push(`${label}: outside the sheet, dropped`);
       continue;
     }
-    if (cell.block && isBedrock(profile, col, row) && !notices.includes(BEDROCK_NOTICE)) notices.push(BEDROCK_NOTICE);
+    if (cell.block && isBedrock(profile, col, row)) {
+      const n = bedrockNotice(profile, cell.block);
+      if (n && !notices.includes(n)) notices.push(n);
+    }
     writes.push({ col, row, cell });
   }
   return { writes, problems, notices };
@@ -302,7 +316,13 @@ export function transpose(profile: GameProfile, sheet: Sheet, rect: CellRect, se
     setBlock(sheet, c.col, c.to.row, { type: 'note', instrument: c.block.instrument, accidental: c.to.accidental });
     moved.set(c.key, c.to.row);
   }
-  if (candidates.some((c) => isBedrock(profile, c.col, c.to.row))) rep.add(BEDROCK_NOTICE);
+  const bedrockNotices = new Set<string>();
+  for (const c of candidates) {
+    if (!isBedrock(profile, c.col, c.to.row)) continue;
+    const n = bedrockNotice(profile, c.block);
+    if (n) bedrockNotices.add(n);
+  }
+  bedrockNotices.forEach((n) => rep.add(n));
   let changed = candidates.length;
 
   // Gear notes.

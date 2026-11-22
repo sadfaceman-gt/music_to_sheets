@@ -19,6 +19,8 @@ export interface DrawParams {
   dpr: number;
   /** Background colour per row (null = none); see rowColors.ts. */
   rowBands?: (string | null)[];
+  /** What a click would paint: drawn faint under the pointer so the Paint tool shows what it will place (T13). */
+  ghost?: Cell | null;
 }
 
 const FONT = 'system-ui, sans-serif';
@@ -138,6 +140,11 @@ export function draw(ctx: CanvasRenderingContext2D, p: DrawParams): void {
     ctx.strokeStyle = THEME.hoverStroke;
     ctx.lineWidth = 1;
     ctx.strokeRect(x + 0.5, y + 0.5, cs - 1, cs - 1);
+    if (p.ghost) {
+      ctx.globalAlpha = 0.55;
+      drawCell(ctx, profile, p.ghost, x, y, cs, colors, isBedrock(profile, p.hover.col, p.hover.row));
+      ctx.globalAlpha = 1;
+    }
   }
   if (p.selection) {
     const s = p.selection;

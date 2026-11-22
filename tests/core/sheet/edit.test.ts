@@ -4,6 +4,7 @@ import profileJson from '../../../public/profiles/growtopia-default.json';
 import { parseGameProfile } from '../../../src/core/profile/schema';
 import {
   BEDROCK_NOTICE,
+  BEDROCK_UNSUPPORTED_NOTICE,
   cellLabel,
   copy,
   duplicate,
@@ -92,15 +93,32 @@ describe('paint', () => {
 
   it('allows every sheet block on bedrock cells, with a notice that they become Racks at export (T11)', () => {
     const s = fresh(400);
-    for (const [i, id] of ['piano:natural', 'blank', 'repeatBegin', 'repeatEnd'].entries()) {
+    for (const [i, id] of ['piano:natural', 'blank'].entries()) {
       const r = paint(profile, s, { col: 300 + i, row: 12 }, entry(id));
       expect(r.changed).toBe(1);
       expect(r.messages).toEqual([BEDROCK_NOTICE]);
     }
-    expect(Object.keys(s.cells)).toHaveLength(4);
+    expect(Object.keys(s.cells)).toHaveLength(2);
     // Not bedrock: other page, other rows: no notice.
     expect(paint(profile, s, { col: 299, row: 12 }, entry('piano:natural'))).toEqual({ changed: 1, messages: [] });
     expect(paint(profile, s, { col: 300, row: 11 }, entry('piano:natural'))).toEqual({ changed: 1, messages: [] });
+  });
+
+  it('warns that Spooky, Festive and Repeat blocks on bedrock make the sheet world-unsupported (T12)', () => {
+    const s = fresh(400);
+    for (const id of ['spooky:natural', 'festive:natural', 'repeatBegin', 'repeatEnd']) {
+      const r = paint(profile, s, { col: 300, row: 12 }, entry(id));
+      expect(r.changed).toBe(1);
+      expect(r.messages).toEqual([BEDROCK_UNSUPPORTED_NOTICE]);
+    }
+  });
+
+  it('pastes Repeat blocks onto bedrock with the unsupported notice (T12)', () => {
+    const s = fresh(400);
+    put(s, 0, 0, { block: { type: 'repeatBegin' } });
+    const r = paste(profile, s, { col: 300, row: 12 }, copy(s, rect(0, 0, 0, 0)));
+    expect(r.changed).toBe(1);
+    expect(r.messages).toEqual([BEDROCK_UNSUPPORTED_NOTICE]);
   });
 
   it('allows Gear and Rack on bedrock', () => {
