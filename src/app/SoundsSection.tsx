@@ -96,7 +96,7 @@ export function SoundsSection({ session }: { session: AudioSession }) {
       </p>
       <p data-testid="sound-source" className="text-sm text-slate-300">
         {placeholders ? (stored > 0 ? 'Using your samples where found and placeholder sounds for the rest.' : 'Using placeholder sounds.') : 'Using your samples.'}
-        {stored > 0 && decoded < stored && ' Some files could not be decoded.'}
+        {busy === null && stored > 0 && decoded < stored && ' Some files could not be decoded.'}
       </p>
       {stored > 0 && missingList.length > 0 && (
         <div data-testid="sound-missing" className="text-sm text-amber-200">
@@ -113,7 +113,7 @@ export function SoundsSection({ session }: { session: AudioSession }) {
       {calibration && calibration.entries.length > 0 && (
         <table data-testid="calibration-table" className="w-full text-left text-sm">
           <caption className="mb-1 text-left text-slate-400">
-            Pitch check: a few files per instrument are measured against the Game Profile. "octave?" means the right note in another octave.
+            Pitch check: a few files per instrument are measured against the Game Profile. A pitch tracker often hears these samples an octave off, so an octave-only difference still counts as ok: octaves were checked by ear. "off" means a wrong note or out of tune.
           </caption>
           <thead className="text-slate-400">
             <tr>

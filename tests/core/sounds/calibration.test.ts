@@ -27,7 +27,7 @@ describe('checkCalibration', () => {
     expect(lo.entries[0]).toMatchObject({ status: 'octave?', ok: false, octaveOff: 1 });
     const hi = checkCalibration(profile, [{ instrument: 'piano', file: 5, hz: at(5 - 12) }]);
     expect(hi.entries[0]).toMatchObject({ status: 'octave?', octaveOff: -1 });
-    expect(hi.instruments.piano).toBe('octave?');
+    expect(hi.instruments.piano).toBe('ok');
   });
 
   it('a pitch that is neither right nor a whole octave away is off', () => {
@@ -56,5 +56,31 @@ describe('checkCalibration', () => {
       { instrument: 'piano', file: 2, hz: at(2 + 12) },
     ]);
     expect(r.instruments.piano).toBe('off');
+  });
+});
+
+describe('instrument summary (cycle 2: octaves verified by ear)', () => {
+  const p = parseGameProfile(profileJson);
+  const piano = p.instruments.piano as { baseMidi: number };
+  const hz = (midi: number) => 440 * 2 ** ((midi - 69) / 12);
+  it('octave-only differences and a single unmeasurable file still read ok', () => {
+    const r = checkCalibration(p, [
+      { instrument: 'piano', file: 0, hz: null },
+      { instrument: 'piano', file: 13, hz: hz(piano.baseMidi + 13 - 12) },
+      { instrument: 'piano', file: 25, hz: hz(piano.baseMidi + 25 - 24) },
+    ]);
+    expect(r.instruments.piano).toBe('ok');
+    expect(r.entries.map((e) => e.status)).toEqual(['no pitch', 'octave?', 'octave?']);
+  });
+  it('an out-of-tune file makes the instrument off', () => {
+    const r = checkCalibration(p, [
+      { instrument: 'piano', file: 13, hz: hz(piano.baseMidi + 13) },
+      { instrument: 'piano', file: 25, hz: hz(piano.baseMidi + 25 + 3) },
+    ]);
+    expect(r.instruments.piano).toBe('off');
+  });
+  it('no measurable file at all is no pitch', () => {
+    const r = checkCalibration(p, [{ instrument: 'piano', file: 13, hz: null }]);
+    expect(r.instruments.piano).toBe('no pitch');
   });
 });

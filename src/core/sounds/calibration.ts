@@ -28,12 +28,11 @@ export interface CalibrationEntry {
 
 export interface CalibrationReport {
   entries: CalibrationEntry[];
-  /** Worst status per instrument: off > no pitch > octave? > ok (unpitched instruments stay 'not pitched'). */
+  /** Per instrument: off if any file is out of tune, no pitch if none could be measured, else ok (octave-only differences are ok). */
   instruments: Record<string, CalibrationStatus>;
 }
 
 const CENTS_PER_SEMITONE = 1e2;
-const SEVERITY: Record<CalibrationStatus, number> = { 'not pitched': 0, ok: 1, 'octave?': 2, 'no pitch': 3, off: 4 };
 
 /**
  * Compares measured sample pitches with the profile (baseMidi + file). An octave error is reported as
@@ -64,10 +63,17 @@ export function checkCalibration(
     const status: CalibrationStatus = ok ? 'ok' : octaveOff !== 0 ? 'octave?' : 'off';
     entries.push({ instrument: m.instrument, file: m.file, status, expectedMidi, measuredMidi, centsOff, octaveOff, ok });
   }
+  // Per instrument: 'off' if any file is out of tune; 'no pitch' only when no file could be measured; else 'ok'.
+  // Octave-only differences count as ok: pitch trackers misjudge these samples' octave, and the profile's
+  // octaves were verified by ear (Design 2.4, cycle 2). The per-file entries keep their octaveOff.
   const instruments: Record<string, CalibrationStatus> = {};
-  for (const e of entries) {
-    const prev = instruments[e.instrument];
-    if (prev === undefined || SEVERITY[e.status] > SEVERITY[prev]) instruments[e.instrument] = e.status;
+  const byInstrument = new Map<string, CalibrationEntry[]>();
+  for (const e of entries) byInstrument.set(e.instrument, [...(byInstrument.get(e.instrument) ?? []), e]);
+  for (const [instrument, list] of byInstrument) {
+    if (list.some((e) => e.status === 'not pitched')) instruments[instrument] = 'not pitched';
+    else if (list.some((e) => e.status === 'off')) instruments[instrument] = 'off';
+    else if (list.every((e) => e.status === 'no pitch')) instruments[instrument] = 'no pitch';
+    else instruments[instrument] = 'ok';
   }
   return { entries, instruments };
 }
