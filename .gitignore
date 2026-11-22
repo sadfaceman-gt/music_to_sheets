@@ -11,8 +11,9 @@ dist/
 .vite/
 coverage/
 
-# Orchestrator/sub-agent briefs and reports (Development Plan 5)
-.agents/
+# Orchestrator/sub-agent briefs and reports (Development Plan 5); templates are committed
+.agents/briefs/
+.agents/reports/
 
 # Local Claude settings
 .claude/settings.local.json

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Music to Sheets is a browser app that transcribes songs (MP3) into Growtopia sheet music (GMSF). It is a static site on GitHub Pages (`sadfaceman-gt.github.io/music_to_sheets/`, repo `github.com/sadfaceman-gt/music_to_sheets`), so everything, stem separation included, runs client-side.
 
-**Current milestone: M0 Foundations (cycle 0).** The app is an empty shell with a startup report; no editor, audio or ML yet.
+**Current milestone: M1 Editor and simulator** (M0 Foundations closed 2026-11-22). The app so far is a shell with a startup report; no editor, audio or ML yet.
 
 ## Source of truth: Claude Docs
 
@@ -15,7 +15,7 @@ Start each session with [`DEVELOPMENT.md`](DEVELOPMENT.md). It links the three C
 - **Development Plan**: cycles, the review/fix round, sub-milestones, Herdr orchestration, milestones.
 - **Development Log**: cycle log, feedback/bug tracker, per-cycle goal prompts. **Read it first each session.**
 
-Work runs in short cycles, one `/goal` prompt each, ending in a testable build plus a test script for the user. Only the orchestrator session edits the Claude Docs and this file; sub-agents propose changes in their reports.
+Work runs in short cycles, one `/goal` prompt each, ending in a testable build plus a test script for the user (tested in Chrome and Firefox). At Ready for review the orchestrator hands the cycle to a per-cycle review agent that works through the user's feedback and returns a cycle report (Development Plan 3). Only the orchestrator edits the Claude Docs and this file, except that the review agent updates Status and Resolution of its own cycle's tracker rows; everyone else proposes changes in their reports.
 
 ## Commands
 
@@ -32,7 +32,7 @@ npm run build        # typecheck + production build to dist/
 npm run preview      # serve dist/ with isolation headers
 ```
 
-CI (`.github/workflows/ci.yml`) runs typecheck, lint, test and build on every pull request and on `master`. `deploy.yml` deploys `master` to Pages; run it by hand on a cycle branch to publish the review demo.
+CI (`.github/workflows/ci.yml`) runs typecheck, lint, test and build on every pull request and on `master`. `deploy.yml` deploys every push to `master` or `cycle/*` to Pages, so the site shows the current cycle's demo until it merges.
 
 ## Layout and conventions
 
@@ -41,7 +41,8 @@ CI (`.github/workflows/ci.yml`) runs typecheck, lint, test and build on every pu
 - React 19 function components, Tailwind for styling.
 - Tests live in `tests/`, mirroring `src/` (e.g. `tests/core/profile.test.ts`). Every bug the user reports gets a test.
 - Git: the default branch is `master`. Each cycle works on `cycle/<N>`; sub-agent tasks use `c<N>/<task>` branches in `../mts-<task>` worktrees, merged into the cycle branch. The cycle PR merges into `master` only when the cycle closes.
-- Sub-agent briefs and reports are files in `.agents/` (git-ignored; templates in `.agents/templates/`). `.claude/settings.json` holds the agents' permissions.
+- Sub-agent briefs and reports are files in `.agents/briefs/` and `.agents/reports/` (git-ignored); templates for task and review briefs and reports are committed in `.agents/templates/`. `.claude/settings.json` holds the agents' permissions.
+- Herdr starts terminals on the Bazzite host, so agents launch inside the container: `hc run --name <t> -- distrobox enter unitybox -- bash -lc 'cd <worktree> && claude -p "<prompt>" --model <m> --permission-mode acceptEdits --add-dir <repo>/.agents'` (prompt before the flags; interactive agents drop `-p`).
 - `public/coi-serviceworker.js` is vendored from the `coi-serviceworker` npm package (MIT). Re-copy it from `node_modules/` when upgrading.
 
 ## Hard rules
