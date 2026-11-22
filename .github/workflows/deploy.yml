@@ -1,11 +1,12 @@
 name: Deploy to GitHub Pages
 
-# master deploys automatically. A cycle branch is deployed as the review demo by
-# running this workflow by hand on that branch (Actions tab, Run workflow), which
-# needs the branch allowed under Settings > Environments > github-pages.
+# master deploys on push. Pushes to a cycle branch (cycle/<N>) also deploy, so the
+# site is that cycle's review demo until it merges; the github-pages environment
+# allows cycle/* under Settings > Environments. workflow_dispatch redeploys any
+# branch by hand (GitHub only offers it once this file is on master).
 on:
   push:
-    branches: [master]
+    branches: [master, 'cycle/*']
   workflow_dispatch:
 
 permissions:
