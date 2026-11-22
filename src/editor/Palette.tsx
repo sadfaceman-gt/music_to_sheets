@@ -40,7 +40,8 @@ function swatchText(profile: GameProfile, entry: PaletteEntry): string {
 
 export interface PaletteProps {
   profile: GameProfile;
-  selectedId: string;
+  /** The selected block, or null when a tool other than painting is active (T16). */
+  selectedId: string | null;
   onSelect: (id: string) => void;
   /** One-key shortcuts, key -> entry id (T10). */
   bindings: Record<string, string>;
@@ -54,7 +55,7 @@ export function Palette({ profile, selectedId, onSelect, bindings, listeningId, 
   const colors = useMemo(() => instrumentColors(profile), [profile]);
 
   return (
-    <nav aria-label="Palette" className="flex w-44 shrink-0 flex-col gap-3 overflow-y-auto border-r border-slate-800 bg-slate-900 p-2">
+    <nav aria-label="Palette" data-palette className="flex w-44 shrink-0 flex-col gap-3 overflow-y-auto border-r border-slate-800 bg-slate-900 p-2">
       {groups.map((g) => (
         <section key={g.key} aria-label={g.title}>
           <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">{g.title}</h3>

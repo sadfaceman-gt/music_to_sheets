@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import type { GameProfile } from '../core/profile/schema.ts';
 import { humaniseKey } from '../core/sheet/palette.ts';
+import { keyOf, toolBindingId } from './shortcuts.ts';
+import type { Bindings } from './shortcuts.ts';
 import { TOOLS } from './tools.ts';
 import type { ToolId } from './tools.ts';
 
@@ -13,12 +15,17 @@ const TRANSPOSE_STEPS: readonly [string, number, string][] = [
   ['+12', OCTAVE, 'Alt+Shift+Up'],
 ];
 
-const btn = 'rounded bg-slate-800 px-2 py-1 text-sm hover:bg-slate-700 disabled:opacity-40';
+const btnBase = 'rounded px-2 py-1 text-sm disabled:opacity-40';
+const btn = `${btnBase} bg-slate-800 hover:bg-slate-700`;
 
 export interface ToolbarProps {
   profile: GameProfile;
   tool: ToolId;
   onTool: (tool: ToolId) => void;
+  /** Shortcut keys (T17) and the tool waiting for a key after a right-click. */
+  bindings: Bindings;
+  listeningId: string | null;
+  onListen: (id: string) => void;
   hasSelection: boolean;
   canUndo: boolean;
   canRedo: boolean;
@@ -40,20 +47,35 @@ export function Toolbar(p: ToolbarProps) {
   return (
     <div role="toolbar" aria-label="Tools" className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-800 bg-slate-900 px-3 py-2">
       <div className="flex gap-1">
-        {TOOLS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            data-testid={`tool-${t.id}`}
-            aria-label={t.label}
-            aria-pressed={p.tool === t.id}
-            title={`${t.label} (${t.key})`}
-            onClick={() => p.onTool(t.id)}
-            className={`${btn} ${p.tool === t.id ? 'bg-sky-700 hover:bg-sky-600' : ''}`}
-          >
-            {t.label} <kbd className="text-xs text-slate-400">{t.key}</kbd>
-          </button>
-        ))}
+        {TOOLS.map((t) => {
+          const id = toolBindingId(t.id);
+          const key = keyOf(p.bindings, id);
+          const active = p.tool === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              data-testid={`tool-${t.id}`}
+              aria-label={t.label}
+              aria-pressed={active}
+              title={`${t.label}${key ? ` (${key.toUpperCase()})` : ''}. Right-click to set a shortcut key`}
+              onClick={() => p.onTool(t.id)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                p.onListen(id);
+              }}
+              className={`${btnBase} ${
+                p.listeningId === id
+                  ? 'bg-slate-800 ring-2 ring-amber-400'
+                  : active
+                    ? 'bg-sky-600 font-semibold text-white ring-2 ring-sky-300'
+                    : 'bg-slate-800 hover:bg-slate-700'
+              }`}
+            >
+              {t.label} {key && <kbd data-testid={`tool-key-${t.id}`} className="text-xs opacity-70">{key.toUpperCase()}</kbd>}
+            </button>
+          );
+        })}
       </div>
 
       <div className="flex items-center gap-1" role="group" aria-label="Transpose selection">

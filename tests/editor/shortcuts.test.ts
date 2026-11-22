@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { bindableKey, bindKey, keyOf, unbind } from '../../src/editor/shortcuts';
+import { bindableKey, bindKey, defaultBindings, keyOf, toolBindingId, unbind } from '../../src/editor/shortcuts';
 
-const RESERVED = ['B', 'E', 'V', 'G'];
+const RESERVED: string[] = [];
 
 describe('palette shortcuts (T10)', () => {
   it('accepts one printable character, lower-cased', () => {
@@ -28,10 +28,21 @@ describe('palette shortcuts (T10)', () => {
     expect(r.message).toBeDefined();
   });
 
-  it('refuses tool keys and unbindable keys', () => {
-    expect(bindKey({}, 'x', 'b', RESERVED).bindings).toEqual({});
-    expect(bindKey({}, 'x', 'b', RESERVED).message).toContain('tool');
+  it('refuses unbindable keys and reserved ones', () => {
     expect(bindKey({}, 'x', 'Escape', RESERVED).bindings).toEqual({});
+    expect(bindKey({}, 'x', 'b', ['B']).message).toContain('reserved');
+  });
+
+  it('starts with E, V and G on the Erase, Select and Gear editor tools, and they can be rebound or removed (T17)', () => {
+    const d = defaultBindings();
+    expect(d).toEqual({ e: 'tool:erase', v: 'tool:select', g: 'tool:gear' });
+    const r = bindKey(d, toolBindingId('erase'), 'x', RESERVED);
+    expect(r.bindings).toEqual({ x: 'tool:erase', v: 'tool:select', g: 'tool:gear' });
+    expect(unbind(r.bindings, toolBindingId('erase'))).toEqual({ v: 'tool:select', g: 'tool:gear' });
+    // A block can take a tool's key over, and the tool then has none.
+    const t = bindKey(d, 'piano:natural', 'e', RESERVED);
+    expect(t.bindings).toEqual({ e: 'piano:natural', v: 'tool:select', g: 'tool:gear' });
+    expect(keyOf(t.bindings, 'tool:erase')).toBeUndefined();
   });
 
   it('unbinds', () => {

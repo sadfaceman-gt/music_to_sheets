@@ -16,6 +16,8 @@ export interface GearEditorProps {
   initial: GearBlock | undefined;
   /** Called with the current draft whenever it changes (valid notes only). The parent saves it when the editor closes. */
   onDraft: (gear: GearBlock) => void;
+  /** The note picked on the left panel, placed by clicking the grid (T18); null when no note is picked. */
+  brush: { instrument: string; accidental: Accidental } | null;
   onRemove: () => void;
   /** Save and close. */
   onClose: () => void;
@@ -25,7 +27,7 @@ export interface GearEditorProps {
  * Editor for one cell's Gear/Rack: kind, a 14 x maxNotes grid (one note per column), note slots, volume, the exact
  * text to type, and a parser for pasted text. Edits go to the parent as a draft; closing saves it (T8).
  */
-export function GearEditor({ profile, pos, initial, onDraft, onRemove, onClose }: GearEditorProps) {
+export function GearEditor({ profile, pos, initial, onDraft, brush, onRemove, onClose }: GearEditorProps) {
   const { gear } = profile;
   const writable = useMemo(
     () => Object.entries(profile.instruments).filter(([, inst]) => inst.code !== null).map(([key]) => key),
@@ -38,8 +40,6 @@ export function GearEditor({ profile, pos, initial, onDraft, onRemove, onClose }
     Array.from({ length: gear.maxNotes }, (_, i) => (initial?.notes[i] ? { ...initial.notes[i] } : null)),
   );
   const notes = useMemo(() => slots.filter((n): n is GearNote => n !== null), [slots]);
-  const [brushInstrument, setBrushInstrument] = useState(() => writable[0] ?? '');
-  const [brushAccidental, setBrushAccidental] = useState<Accidental>('natural');
   const [gridMessage, setGridMessage] = useState('');
   const [volume, setVolume] = useState<number>(initial?.volume ?? gear.volume.max);
   const [text, setText] = useState('');
@@ -75,10 +75,14 @@ export function GearEditor({ profile, pos, initial, onDraft, onRemove, onClose }
   /** Grid click: place the brush note in that column (replacing the column's note); clicking the same note clears it. */
   const placeOnGrid = (col: number, row: number) => {
     const letter = letters[row];
-    if (letter === undefined || !brushInstrument) return;
-    const note: GearNote = { instrument: brushInstrument, letter, accidental: brushAccidental };
+    if (letter === undefined) return;
+    if (!brush) {
+      setGridMessage('Pick a note in the left panel first');
+      return;
+    }
+    const note: GearNote = { instrument: brush.instrument, letter, accidental: brush.accidental };
     if (gearNoteToken(profile, note) === null) {
-      setGridMessage(`${humaniseKey(brushInstrument)} has no ${letter}${brushAccidental === 'natural' ? '' : ' ' + brushAccidental} note`);
+      setGridMessage(`${humaniseKey(brush.instrument)} has no ${letter}${brush.accidental === 'natural' ? '' : ' ' + brush.accidental} note`);
       return;
     }
     setGridMessage('');
@@ -186,38 +190,7 @@ export function GearEditor({ profile, pos, initial, onDraft, onRemove, onClose }
       </button>
 
       <div className="flex flex-col gap-1" data-testid="gear-grid-wrap">
-        <div className="text-slate-400">Click the grid to place notes (one per column):</div>
-        <div className="flex gap-1">
-          <select
-            aria-label="Grid instrument"
-            data-testid="gear-brush-instrument"
-            value={brushInstrument}
-            onChange={(e) => {
-              setBrushInstrument(e.target.value);
-              if (!acceptsAccidental(profile, e.target.value, brushAccidental)) setBrushAccidental('natural');
-            }}
-            className="min-w-0 flex-1 rounded bg-slate-800 px-1 py-1"
-          >
-            {writable.map((key) => (
-              <option key={key} value={key}>
-                {humaniseKey(key)}
-              </option>
-            ))}
-          </select>
-          <select
-            aria-label="Grid accidental"
-            data-testid="gear-brush-accidental"
-            value={brushAccidental}
-            onChange={(e) => setBrushAccidental(e.target.value as Accidental)}
-            className="rounded bg-slate-800 px-1 py-1"
-          >
-            {ACCIDENTALS.filter((a) => acceptsAccidental(profile, brushInstrument, a)).map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
-            ))}
-          </select>
-        </div>
+        <div className="text-slate-400">Pick a note in the left panel, then click the grid to place it (one per column):</div>
         <div role="grid" aria-label="Gear notes" className="grid gap-px" style={{ gridTemplateColumns: `1.25rem repeat(${gear.maxNotes}, 1fr)` }}>
           {letters.map((letter, row) => (
             <div key={row} role="row" className="contents">

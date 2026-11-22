@@ -63,7 +63,7 @@ test('loads with no console errors', async ({ page }) => {
   await page.reload();
   await page.getByTestId('strip-canvas').waitFor();
   await page.waitForFunction(() => (globalThis as unknown as Hooks).__mtsTest !== undefined);
-  await expect(page.getByTestId('tool-paint')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId(`palette-${firstInstrument}:natural`)).toHaveAttribute('aria-pressed', 'true');
   expect(errors).toEqual([]);
 });
 
@@ -245,7 +245,7 @@ test('shortcuts do not fire while typing in a field', async ({ page }) => {
   await page.keyboard.press('Control+z');
   expect((await cell(page, 1, 1))?.block).toBeDefined();
   await page.keyboard.type('e');
-  await expect(page.getByTestId('tool-paint')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('tool-erase')).toHaveAttribute('aria-pressed', 'false');
 });
 
 test('tool and palette shortcuts', async ({ page }) => {
@@ -255,8 +255,6 @@ test('tool and palette shortcuts', async ({ page }) => {
   await expect(page.getByTestId('tool-select')).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('g');
   await expect(page.getByTestId('tool-gear')).toHaveAttribute('aria-pressed', 'true');
-  await page.keyboard.press('b');
-  await expect(page.getByTestId('tool-paint')).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('palette-blank').click();
   await click(page, 2, 2);
   expect((await cell(page, 2, 2))?.block).toEqual({ type: 'blank' });
@@ -352,6 +350,7 @@ test('T8: Audio Gear is a palette block; clicking it again opens the editor and 
   await expect(page.getByTestId('gear-form')).toHaveCount(0);
   await click(page, 4, 4); // gear over a gear: opens the editor, deletes nothing
   await expect(page.getByTestId('gear-form')).toBeVisible();
+  await page.getByTestId(`palette-${firstInstrument}:natural`).click(); // T18: picking a note keeps the editor open
   expect((await cell(page, 4, 4))?.gear).toBeDefined();
   expect((await cell(page, 4, 4))?.block).toBeDefined();
   // The grid: one note per column, a second note in the column replaces the first.
@@ -366,6 +365,7 @@ test('T8: Audio Gear is a palette block; clicking it again opens the editor and 
   expect((await cell(page, 4, 4))?.gear?.notes).toHaveLength(2);
   expect((await cell(page, 4, 4))?.block).toBeDefined();
   // Dragging from a gear does nothing.
+  await page.getByTestId(`palette-${profile.gear.defaultType}`).click();
   const before = await cellCount(page);
   await drag(page, [4, 4], [10, 4]);
   expect(await cellCount(page)).toBe(before);
@@ -376,7 +376,9 @@ test('T8: clicking another gear saves the previous one', async ({ page }) => {
   await click(page, 2, 2);
   await click(page, 6, 2);
   await click(page, 2, 2);
+  await page.getByTestId(`palette-${firstInstrument}:natural`).click();
   await page.getByTestId('gear-grid-0-4').click();
+  await page.getByTestId(`palette-${profile.gear.defaultType}`).click();
   await click(page, 6, 2);
   expect((await cell(page, 2, 2))?.gear?.notes).toHaveLength(1);
   await expect(page.getByTestId('gear-form')).toBeVisible();
@@ -407,4 +409,55 @@ test('T9: rows get a colour band that Settings can change', async ({ page }) => 
   await page.getByTestId('row-colors').selectOption('none');
   await page.getByTestId('settings-close').click();
   await expect(page.getByTestId('strip-canvas')).toBeVisible();
+});
+
+test('T15/T16: no Paint button; picking a tool deselects the palette block, picking a block deselects the tool', async ({ page }) => {
+  await expect(page.getByTestId('tool-paint')).toHaveCount(0);
+  const piano = page.getByTestId(`palette-${firstInstrument}:natural`);
+  await expect(piano).toHaveAttribute('aria-pressed', 'true');
+  for (const id of ['erase', 'select', 'gear']) {
+    await pickTool(page, id);
+    await expect(piano).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.locator('[data-palette] [aria-pressed="true"]')).toHaveCount(0);
+  }
+  await piano.click();
+  await expect(piano).toHaveAttribute('aria-pressed', 'true');
+  for (const id of ['erase', 'select', 'gear']) await expect(page.getByTestId(`tool-${id}`)).toHaveAttribute('aria-pressed', 'false');
+  await click(page, 3, 3);
+  expect((await cell(page, 3, 3))?.block).toBeDefined();
+});
+
+test('T17: right-click a tool button to rebind its key; Escape removes it', async ({ page }) => {
+  await expect(page.getByTestId('tool-key-erase')).toHaveText('E');
+  await page.getByTestId('tool-erase').click({ button: 'right' });
+  await page.keyboard.press('x');
+  await expect(page.getByTestId('tool-key-erase')).toHaveText('X');
+  await page.keyboard.press('x');
+  await expect(page.getByTestId('tool-erase')).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('e'); // no longer bound
+  await pickTool(page, 'select');
+  await page.keyboard.press('e');
+  await expect(page.getByTestId('tool-select')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('tool-select').click({ button: 'right' });
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('tool-key-select')).toHaveCount(0);
+  await page.reload();
+  await page.getByTestId('strip-canvas').waitFor();
+  await expect(page.getByTestId('tool-key-erase')).toHaveText('X');
+  await expect(page.getByTestId('tool-key-select')).toHaveCount(0);
+});
+
+test('T18: notes for the Gear grid come from the left panel, which keeps the editor open', async ({ page }) => {
+  await page.getByTestId(`palette-${profile.gear.defaultType}`).click();
+  await click(page, 5, 5);
+  await click(page, 5, 5);
+  await expect(page.getByTestId('gear-form')).toBeVisible();
+  await expect(page.getByTestId('gear-brush-instrument')).toHaveCount(0);
+  await page.getByTestId('gear-grid-0-2').click(); // the Rack block is no note: nothing is placed
+  await expect(page.getByTestId('gear-grid-0-2')).toHaveAttribute('aria-pressed', 'false');
+  await page.getByTestId(`palette-${secondInstrument}:natural`).click();
+  await expect(page.getByTestId('gear-form')).toBeVisible();
+  await page.getByTestId('gear-grid-0-2').click();
+  await expect(page.getByTestId('gear-grid-0-2')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('gear-preview')).not.toHaveText('');
 });

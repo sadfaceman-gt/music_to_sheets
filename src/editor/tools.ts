@@ -7,15 +7,17 @@ export type ToolId = 'paint' | 'erase' | 'select' | 'gear';
 export interface ToolInfo {
   id: ToolId;
   label: string;
-  key: string;
   cursor: string;
 }
 
+/** Painting is what picking a palette block does, so it has no button of its own (T15). */
+export const PAINT_CURSOR = 'crosshair';
+
+/** The tools with a button on the toolbar. Their shortcut keys are in shortcuts.ts. */
 export const TOOLS: readonly ToolInfo[] = [
-  { id: 'paint', label: 'Paint', key: 'B', cursor: 'crosshair' },
-  { id: 'erase', label: 'Erase', key: 'E', cursor: 'cell' },
-  { id: 'select', label: 'Select', key: 'V', cursor: 'default' },
-  { id: 'gear', label: 'Gear editor', key: 'G', cursor: 'pointer' },
+  { id: 'erase', label: 'Erase', cursor: 'cell' },
+  { id: 'select', label: 'Select', cursor: 'default' },
+  { id: 'gear', label: 'Gear editor', cursor: 'pointer' },
 ];
 
 /** Every cell on the straight line from a to b, both ends included (Bresenham), so a fast drag leaves no gaps. */

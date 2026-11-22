@@ -11,10 +11,10 @@ import { createEditorStore, useEditor } from './store.ts';
 import type { EditorStore } from './store.ts';
 import { Toolbar } from './Toolbar.tsx';
 import { isTypingTarget } from './dom.ts';
-import { bindableKey, bindKey, loadBindings, loadShortcutsEnabled, saveBindings, saveShortcutsEnabled, unbind } from './shortcuts.ts';
+import { bindableKey, bindKey, loadBindings, loadShortcutsEnabled, saveBindings, saveShortcutsEnabled, toolBindingId, unbind } from './shortcuts.ts';
 import type { Bindings } from './shortcuts.ts';
 import { DEFAULT_ROW_COLOR_PROFILE } from './view/rowColors.ts';
-import { cellsOnLine, TOOLS } from './tools.ts';
+import { cellsOnLine, PAINT_CURSOR, TOOLS } from './tools.ts';
 import type { ToolId } from './tools.ts';
 import { StripView } from './view/StripView.tsx';
 import type { CellPointerEvent } from './view/StripView.tsx';
@@ -117,13 +117,11 @@ function useShortcuts(
           return;
       }
       if (!keysEnabled) return;
-      const tool = TOOLS.find((t) => t.key.toLowerCase() === key);
-      if (tool) {
-        setTool(tool.id);
-        return;
-      }
-      const block = bindings[key];
-      if (block) pickBlock(block);
+      const target = bindings[key];
+      if (!target) return;
+      const tool = TOOLS.find((t) => toolBindingId(t.id) === target);
+      if (tool) setTool(tool.id);
+      else pickBlock(target);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -166,7 +164,7 @@ export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { pro
   // While a palette block waits for a key (after a right-click): a key binds it, Escape removes its shortcut.
   useEffect(() => {
     if (listeningId === null) return;
-    const reserved = TOOLS.map((t) => t.key);
+    const reserved: string[] = [];
     const onKey = (e: KeyboardEvent) => {
       if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return;
       e.preventDefault();
@@ -231,7 +229,7 @@ export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { pro
   useEffect(() => {
     if (!gearCell) return;
     const onPointer = (e: PointerEvent) => {
-      if (e.target instanceof Element && e.target.closest('[data-gear-editor]')) return;
+      if (e.target instanceof Element && e.target.closest('[data-gear-editor], [data-palette]')) return;
       closeGear();
     };
     window.addEventListener('pointerdown', onPointer, true);
@@ -340,7 +338,15 @@ export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { pro
     return { block: { ...entry.paint.block } };
   }, [tool, paletteId, profile]);
 
-  const cursor = TOOLS.find((t) => t.id === tool)?.cursor;
+  const cursor = tool === 'paint' ? PAINT_CURSOR : TOOLS.find((t) => t.id === tool)?.cursor;
+  // The note picked on the left panel is the Gear editor's brush (T18); only while painting is a block picked (T16).
+  const brush = useMemo(() => {
+    if (tool !== 'paint') return null;
+    const entry = paletteEntries(profile).find((x) => x.id === paletteId);
+    return entry?.paint.kind === 'block' && entry.paint.block.type === 'note'
+      ? { instrument: entry.paint.block.instrument, accidental: entry.paint.block.accidental }
+      : null;
+  }, [tool, paletteId, profile]);
   const gearInitial = useMemo<Cell['gear']>(
     () => (gearCell ? getCell(sheet, gearCell.pos.col, gearCell.pos.row)?.gear : undefined),
     // Read once per session: later saves must not reset the form being edited.
@@ -358,6 +364,9 @@ export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { pro
         profile={profile}
         tool={tool}
         onTool={setTool}
+        bindings={bindings}
+        listeningId={listeningId}
+        onListen={setListening}
         hasSelection={selection !== null}
         canUndo={undoDepth > 0}
         canRedo={redoDepth > 0}
@@ -375,7 +384,7 @@ export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { pro
         onVolume={(v) => store.getState().setVolume(v)}
       />
       <div className="flex min-h-0 flex-1">
-        <Palette profile={profile} selectedId={paletteId} onSelect={selectPalette} bindings={bindings} listeningId={listeningId} onListen={setListening} />
+        <Palette profile={profile} selectedId={tool === 'paint' ? paletteId : null} onSelect={selectPalette} bindings={bindings} listeningId={listeningId} onListen={setListening} />
         <div className="min-w-0 flex-1" onPointerLeave={() => updateHover(null)}>
           <StripView profile={profile} sheet={sheet} selection={selection} cursor={cursor} rowColors={rowColors} ghost={ghost} onCellPointer={onCellPointer} />
         </div>
@@ -386,6 +395,7 @@ export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { pro
             pos={gearCell.pos}
             initial={gearInitial}
             onDraft={onDraft}
+            brush={brush}
             onRemove={() => {
               draftRef.current = null;
               store.getState().setGear(gearCell.pos, null);
