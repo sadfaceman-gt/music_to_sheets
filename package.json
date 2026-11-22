@@ -14,15 +14,20 @@
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:facts": "node tools/check-game-facts.mjs",
+    "e2e": "playwright test"
   },
   "dependencies": {
+    "immer": "11.2.10",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "zod": "4.6.7"
+    "zod": "4.6.7",
+    "zustand": "5.1.0"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@playwright/test": "1.65.1",
     "@tailwindcss/vite": "4.3.5",
     "@types/node": "22.20.5",
     "@types/react": "19.3.0",
@@ -33,6 +38,7 @@
     "eslint": "10.15.0",
     "eslint-plugin-react-hooks": "7.1.1",
     "eslint-plugin-react-refresh": "0.5.8",
+    "fast-check": "4.11.0",
     "globals": "17.14.0",
     "tailwindcss": "4.3.5",
     "typescript": "6.0.3",

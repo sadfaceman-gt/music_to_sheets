@@ -1,5 +1,5 @@
 # Never commit: user-supplied game samples, test songs/stems, design export, model weights
-notes/
+proprietary/
 test/
 DESIGN.md
 DEVELOPMENT.md
@@ -14,6 +14,8 @@ dist/
 *.tsbuildinfo
 .vite/
 coverage/
+playwright-report/
+test-results/
 
 # Orchestrator/sub-agent briefs and reports (Development Plan 5); templates are committed
 .agents/briefs/

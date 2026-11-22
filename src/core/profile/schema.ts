@@ -87,6 +87,8 @@ export const gameProfileSchema = z.strictObject({
     rowMatters: z.boolean(),
     invalidNote: z.literal('skip'),
     defaultType: z.enum(['rack', 'gear']),
+    /** Accidental characters in Gear/Rack note text, e.g. Pc- PE# (Design 2.6). */
+    textAccidentals: z.strictObject({ natural: z.string().length(1), sharp: z.string().length(1), flat: z.string().length(1) }),
   }),
   /** Natural note letter (lowercase = lower octave) to sample file index. */
   naturalFiles: z.strictObject(
