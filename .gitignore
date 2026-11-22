@@ -1,5 +1,18 @@
+# Never commit: user-supplied game samples, test songs/stems, design export, model weights
 notes/
 test/
-node_modules/
-*.onnx
 DESIGN.md
+*.onnx
+
+# Build and tooling
+node_modules/
+dist/
+*.tsbuildinfo
+.vite/
+coverage/
+
+# Orchestrator/sub-agent briefs and reports (Development Plan 5)
+.agents/
+
+# Local Claude settings
+.claude/settings.local.json

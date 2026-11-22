@@ -1,0 +1,32 @@
+{
+  "profile": "growtopia-default",
+  "version": 2,
+  "verified": "2026-11-22",
+  "grid": { "rows": 14, "pageCols": 100, "pages": 4, "worldCols": 400,
+            "bedrock": { "page": 4, "rows": [12, 13] } },
+  "timing": { "colsPerBpmBeat": 4, "bpmMin": 20, "bpmMax": 200, "bpmInteger": true },
+  "playback": { "windowBlocks": ["note", "blank", "repeatBegin", "repeatEnd", "gear", "rack"],
+               "pageWrapGap": 0, "foregroundMutes": false, "polyphonyCap": null },
+  "repeats": { "match": "sameNote", "scope": "anyEarlier", "noBegin": "songStart",
+              "oncePerLoop": true, "rearmInner": true },
+  "gear": { "maxNotes": 5, "volume": { "min": 0, "max": 100, "curve": "linear", "clamp": true },
+           "sharesTileWithNote": true, "rowMatters": false,
+           "invalidNote": "skip", "defaultType": "rack" },
+  "naturalFiles": { "c": 1, "d": 3, "e": 5, "f": 6, "g": 8, "a": 10, "b": 12,
+                    "C": 13, "D": 15, "E": 17, "F": 18, "G": 20, "A": 22, "B": 24 },
+  "instruments": {
+    "piano":           { "code": "P", "baseMidi": 59, "accidentals": true, "gmsf": [1, 2, 3] },
+    "bass":            { "code": "B", "baseMidi": 47, "accidentals": true, "gmsf": [4, 5, 6] },
+    "sax":             { "code": "S", "baseMidi": 59, "accidentals": true, "gmsf": [9, 10, 11] },
+    "flute":           { "code": "F", "baseMidi": 71, "accidentals": true, "gmsf": [16, 17, 18] },
+    "spanish_guitar":  { "code": "G", "baseMidi": 59, "accidentals": true, "gmsf": [20, 21, 22] },
+    "violin":          { "code": "V", "baseMidi": 59, "accidentals": true, "gmsf": [23, 24, 25] },
+    "lyre":            { "code": "L", "baseMidi": 59, "accidentals": true, "gmsf": [26, 27, 28] },
+    "electric_guitar": { "code": "E", "baseMidi": 59, "accidentals": true, "gmsf": [29, 30, 31] },
+    "mexican_trumpet": { "code": "T", "baseMidi": 59, "accidentals": true, "gmsf": [32, 33, 34] },
+    "spooky":          { "code": null, "accidentals": false, "gmsf": [14] },
+    "festive":         { "code": null, "accidentals": false, "gmsf": [19] },
+    "drum":            { "code": "D", "accidentals": false, "octave": false, "gmsf": [7],
+                         "files": { "C": 6, "D": 5, "E": 4, "F": 3, "G": 2, "A": 1, "B": 0 } }
+  }
+}
