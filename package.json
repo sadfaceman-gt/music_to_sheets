@@ -14,7 +14,9 @@
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:facts": "node tools/check-game-facts.mjs",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "immer": "11.2.10",

@@ -14,6 +14,8 @@ dist/
 *.tsbuildinfo
 .vite/
 coverage/
+playwright-report/
+test-results/
 
 # Orchestrator/sub-agent briefs and reports (Development Plan 5); templates are committed
 .agents/briefs/
