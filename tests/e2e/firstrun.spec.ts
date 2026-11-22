@@ -108,7 +108,7 @@ test('skip: the app starts with placeholder sounds and they play', async ({ page
   await page.getByTestId('transport-play').click();
   await expect.poll(() => playhead(page), { timeout: 5000 }).not.toBeNull();
   expect((await engineState(page)).transport).toBe('playing');
-  expect((await engineState(page)).contextState).toBe('running');
+  await expect.poll(async () => (await engineState(page)).contextState, { timeout: 5000 }).toBe('running');
   // Passes are scheduled on the audio clock, so placeholder notes really were handed to the engine.
   await expect.poll(async () => (await engineState(page)).contextTime ?? 0).toBeGreaterThan(0.2);
 
