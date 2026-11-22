@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { GameProfile, NaturalLetter } from '../core/profile/schema.ts';
 import { formatGearText, gearNoteToken, parseGearText } from '../core/sheet/gearText.ts';
 import { cellLabel } from '../core/sheet/edit.ts';
@@ -14,13 +14,18 @@ export interface GearEditorProps {
   pos: CellPos;
   /** The cell's current Gear/Rack, if any. */
   initial: GearBlock | undefined;
-  onSave: (gear: GearBlock) => void;
+  /** Called with the current draft whenever it changes (valid notes only). The parent saves it when the editor closes. */
+  onDraft: (gear: GearBlock) => void;
   onRemove: () => void;
-  onCancel: () => void;
+  /** Save and close. */
+  onClose: () => void;
 }
 
-/** Form for one cell's Gear/Rack: kind, note slots, volume, the exact text to type, and a parser for pasted text. */
-export function GearEditor({ profile, pos, initial, onSave, onRemove, onCancel }: GearEditorProps) {
+/**
+ * Editor for one cell's Gear/Rack: kind, a 14 x maxNotes grid (one note per column), note slots, volume, the exact
+ * text to type, and a parser for pasted text. Edits go to the parent as a draft; closing saves it (T8).
+ */
+export function GearEditor({ profile, pos, initial, onDraft, onRemove, onClose }: GearEditorProps) {
   const { gear } = profile;
   const writable = useMemo(
     () => Object.entries(profile.instruments).filter(([, inst]) => inst.code !== null).map(([key]) => key),
@@ -28,7 +33,14 @@ export function GearEditor({ profile, pos, initial, onSave, onRemove, onCancel }
   );
   const letters = useMemo(() => rowLetters(profile), [profile]);
   const [kind, setKind] = useState<GearBlock['kind']>(initial?.kind ?? gear.defaultType);
-  const [notes, setNotes] = useState<GearNote[]>(() => initial?.notes.map((n) => ({ ...n })) ?? []);
+  // One entry per column of the grid; null = empty column. Compacted into the Gear's note list on every change.
+  const [slots, setSlots] = useState<(GearNote | null)[]>(() =>
+    Array.from({ length: gear.maxNotes }, (_, i) => (initial?.notes[i] ? { ...initial.notes[i] } : null)),
+  );
+  const notes = useMemo(() => slots.filter((n): n is GearNote => n !== null), [slots]);
+  const [brushInstrument, setBrushInstrument] = useState(() => writable[0] ?? '');
+  const [brushAccidental, setBrushAccidental] = useState<Accidental>('natural');
+  const [gridMessage, setGridMessage] = useState('');
   const [volume, setVolume] = useState<number>(initial?.volume ?? gear.volume.max);
   const [text, setText] = useState('');
 
@@ -38,23 +50,51 @@ export function GearEditor({ profile, pos, initial, onSave, onRemove, onCancel }
     profile,
     notes.filter((n) => gearNoteToken(profile, n) !== null),
   );
-  const canSave = notes.length > 0 && !invalid && Number.isFinite(volume);
+  const clampVolume = (v: number) => Math.min(gear.volume.max, Math.max(gear.volume.min, v));
+  const validNotes = useMemo(() => notes.filter((n) => gearNoteToken(profile, n) !== null), [profile, notes]);
 
-  const setNote = (i: number, patch: Partial<GearNote>) =>
-    setNotes((all) => all.map((n, j) => (j === i ? { ...n, ...patch } : n)));
+  useEffect(() => {
+    onDraft({ kind, notes: validNotes.map((n) => ({ ...n })), volume: clampVolume(Number.isFinite(volume) ? volume : gear.volume.max) });
+    // clampVolume and gear are derived from the profile, which does not change while the editor is open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, validNotes, volume, onDraft]);
+
+  const setSlot = (i: number, patch: Partial<GearNote> | null) =>
+    setSlots((all) => all.map((n, j) => (j !== i ? n : patch === null ? null : n ? { ...n, ...patch } : null)));
 
   const addNote = () => {
     const instrument = writable[0];
     const letter = letters[0];
     if (instrument === undefined || letter === undefined) return;
-    setNotes((all) => (all.length >= gear.maxNotes ? all : [...all, { instrument, letter, accidental: 'natural' }]));
+    setSlots((all) => {
+      const free = all.indexOf(null);
+      return free < 0 ? all : all.map((n, j) => (j === free ? { instrument, letter, accidental: 'natural' as const } : n));
+    });
   };
 
-  const clampVolume = (v: number) => Math.min(gear.volume.max, Math.max(gear.volume.min, v));
+  /** Grid click: place the brush note in that column (replacing the column's note); clicking the same note clears it. */
+  const placeOnGrid = (col: number, row: number) => {
+    const letter = letters[row];
+    if (letter === undefined || !brushInstrument) return;
+    const note: GearNote = { instrument: brushInstrument, letter, accidental: brushAccidental };
+    if (gearNoteToken(profile, note) === null) {
+      setGridMessage(`${humaniseKey(brushInstrument)} has no ${letter}${brushAccidental === 'natural' ? '' : ' ' + brushAccidental} note`);
+      return;
+    }
+    setGridMessage('');
+    setSlots((all) =>
+      all.map((n, j) => {
+        if (j !== col) return n;
+        const same = n && n.instrument === note.instrument && n.letter === note.letter && n.accidental === note.accidental;
+        return same ? null : note;
+      }),
+    );
+  };
 
   return (
     <aside
       aria-label="Gear editor"
+      data-gear-editor
       data-testid="gear-form"
       className="flex w-80 shrink-0 flex-col gap-3 overflow-y-auto border-l border-slate-800 bg-slate-900 p-3 text-sm"
     >
@@ -75,14 +115,15 @@ export function GearEditor({ profile, pos, initial, onSave, onRemove, onCancel }
       </label>
 
       <ol className="flex flex-col gap-2">
-        {notes.map((n, i) => (
+        {slots.map((n, i) =>
+          n === null ? null : (
           <li key={i} className="flex items-center gap-1">
             <select
               aria-label={`Note ${i + 1} instrument`}
               data-testid={`gear-slot-${i}-instrument`}
               value={n.instrument}
               onChange={(e) =>
-                setNote(i, {
+                setSlot(i, {
                   instrument: e.target.value,
                   ...(acceptsAccidental(profile, e.target.value, n.accidental) ? {} : { accidental: 'natural' as const }),
                 })
@@ -99,7 +140,7 @@ export function GearEditor({ profile, pos, initial, onSave, onRemove, onCancel }
               aria-label={`Note ${i + 1} letter`}
               data-testid={`gear-slot-${i}-letter`}
               value={n.letter}
-              onChange={(e) => setNote(i, { letter: e.target.value as NaturalLetter })}
+              onChange={(e) => setSlot(i, { letter: e.target.value as NaturalLetter })}
               className="rounded bg-slate-800 px-1 py-1"
             >
               {letters.map((l) => (
@@ -112,7 +153,7 @@ export function GearEditor({ profile, pos, initial, onSave, onRemove, onCancel }
               aria-label={`Note ${i + 1} accidental`}
               data-testid={`gear-slot-${i}-accidental`}
               value={n.accidental}
-              onChange={(e) => setNote(i, { accidental: e.target.value as Accidental })}
+              onChange={(e) => setSlot(i, { accidental: e.target.value as Accidental })}
               className="rounded bg-slate-800 px-1 py-1"
             >
               {ACCIDENTALS.filter((a) => acceptsAccidental(profile, n.instrument, a)).map((a) => (
@@ -124,13 +165,14 @@ export function GearEditor({ profile, pos, initial, onSave, onRemove, onCancel }
             <button
               type="button"
               aria-label={`Remove note ${i + 1}`}
-              onClick={() => setNotes((all) => all.filter((_, j) => j !== i))}
+              onClick={() => setSlot(i, null)}
               className="rounded bg-slate-800 px-2 py-1 hover:bg-slate-700"
             >
               ×
             </button>
           </li>
-        ))}
+          ),
+        )}
       </ol>
       {invalid && <p className="text-amber-300">A note can't be written in Gear text (this instrument has no such note).</p>}
       <button
@@ -142,6 +184,66 @@ export function GearEditor({ profile, pos, initial, onSave, onRemove, onCancel }
       >
         Add note ({notes.length}/{gear.maxNotes})
       </button>
+
+      <div className="flex flex-col gap-1" data-testid="gear-grid-wrap">
+        <div className="text-slate-400">Click the grid to place notes (one per column):</div>
+        <div className="flex gap-1">
+          <select
+            aria-label="Grid instrument"
+            data-testid="gear-brush-instrument"
+            value={brushInstrument}
+            onChange={(e) => {
+              setBrushInstrument(e.target.value);
+              if (!acceptsAccidental(profile, e.target.value, brushAccidental)) setBrushAccidental('natural');
+            }}
+            className="min-w-0 flex-1 rounded bg-slate-800 px-1 py-1"
+          >
+            {writable.map((key) => (
+              <option key={key} value={key}>
+                {humaniseKey(key)}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Grid accidental"
+            data-testid="gear-brush-accidental"
+            value={brushAccidental}
+            onChange={(e) => setBrushAccidental(e.target.value as Accidental)}
+            className="rounded bg-slate-800 px-1 py-1"
+          >
+            {ACCIDENTALS.filter((a) => acceptsAccidental(profile, brushInstrument, a)).map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div role="grid" aria-label="Gear notes" className="grid gap-px" style={{ gridTemplateColumns: `1.25rem repeat(${gear.maxNotes}, 1fr)` }}>
+          {letters.map((letter, row) => (
+            <div key={row} role="row" className="contents">
+              <span className="self-center text-center text-xs text-slate-400">{letter}</span>
+              {slots.map((n, col) => {
+                const here = n !== null && n.letter === letter;
+                return (
+                  <button
+                    key={col}
+                    type="button"
+                    role="gridcell"
+                    data-testid={`gear-grid-${col}-${row}`}
+                    aria-label={`Column ${col + 1}, row ${letter}${here ? ', has a note' : ''}`}
+                    aria-pressed={here}
+                    onClick={() => placeOnGrid(col, row)}
+                    className={`h-5 rounded-sm text-[10px] font-bold ${here ? 'bg-sky-500 text-slate-950' : 'bg-slate-800 hover:bg-slate-700'}`}
+                  >
+                    {here ? (profile.instruments[n.instrument]?.code ?? '') : ''}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+        {gridMessage && <p className="text-amber-300">{gridMessage}</p>}
+      </div>
 
       <label className="flex items-center gap-2">
         Volume
@@ -171,7 +273,8 @@ export function GearEditor({ profile, pos, initial, onSave, onRemove, onCancel }
           value={text}
           onChange={(e) => {
             setText(e.target.value);
-            setNotes(parseGearText(profile, e.target.value).notes);
+            const parsedNotes = parseGearText(profile, e.target.value).notes;
+            setSlots(Array.from({ length: gear.maxNotes }, (_, i) => parsedNotes[i] ?? null));
           }}
           className="rounded bg-slate-800 px-2 py-1 font-mono"
         />
@@ -195,11 +298,10 @@ export function GearEditor({ profile, pos, initial, onSave, onRemove, onCancel }
         <button
           type="button"
           data-testid="gear-save"
-          disabled={!canSave}
-          onClick={() => onSave({ kind, notes, volume: clampVolume(volume) })}
+          onClick={onClose}
           className="rounded bg-sky-700 px-3 py-1 hover:bg-sky-600 disabled:opacity-40"
         >
-          Save
+          Save and close
         </button>
         <button
           type="button"
@@ -209,9 +311,6 @@ export function GearEditor({ profile, pos, initial, onSave, onRemove, onCancel }
           className="rounded bg-slate-800 px-3 py-1 hover:bg-slate-700 disabled:opacity-40"
         >
           Remove
-        </button>
-        <button type="button" data-testid="gear-cancel" onClick={onCancel} className="rounded bg-slate-800 px-3 py-1 hover:bg-slate-700">
-          Close
         </button>
       </div>
     </aside>

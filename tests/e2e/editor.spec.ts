@@ -213,6 +213,7 @@ test('the Gear editor parses pasted text and lists skipped tokens', async ({ pag
   await expect(page.getByTestId('gear-preview')).toHaveText(`${code}D${acc.flat} ${code}c${acc.natural}`);
   await page.getByTestId('gear-save').click();
   expect((await cell(page, 5, 2))?.gear?.notes).toHaveLength(2);
+  await click(page, 5, 2); // Save closes the editor; open it again to remove the Gear
   await page.getByTestId('gear-remove').click();
   expect(await cell(page, 5, 2)).toBeNull();
 });
@@ -283,4 +284,127 @@ test('the sheet can grow past the world limit, which shows the world-unsupported
   await expect(page.getByTestId('status-world-warning')).toContainText('20 columns past');
   await click(page, start + 10, 5);
   expect((await cell(page, start + 10, 5))?.block).toBeTruthy();
+});
+
+async function rightDrag(page: Page, from: [number, number], to: [number, number]) {
+  const a = await point(page, from[0], from[1]);
+  const b = await point(page, to[0], to[1]);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(b.x, b.y, { steps: 12 });
+  await page.mouse.up({ button: 'right' });
+}
+
+test('T5: painting the same block again erases it, and a drag from it erases everything it crosses', async ({ page }) => {
+  await drag(page, [1, 4], [6, 4]);
+  await click(page, 3, 4); // same block as the palette: erased
+  expect(await cell(page, 3, 4)).toBeNull();
+  // A different block replaces what is there.
+  await page.getByTestId(`palette-${secondInstrument}:natural`).click();
+  await click(page, 2, 4);
+  expect((await cell(page, 2, 4))?.block).toMatchObject({ instrument: secondInstrument });
+  // Same block, then drag: everything in the path goes, whatever its type.
+  await click(page, 8, 4);
+  await drag(page, [8, 4], [8, 6]);
+  await page.getByTestId('palette-blank').click();
+  await click(page, 9, 4);
+  await page.getByTestId(`palette-${secondInstrument}:natural`).click();
+  await drag(page, [2, 4], [9, 4]);
+  for (let col = 2; col <= 9; col++) expect(await cell(page, col, 4)).toBeNull();
+  expect((await cell(page, 1, 4))?.block).toBeDefined();
+});
+
+test('T5: right-click erases, also while dragging', async ({ page }) => {
+  await drag(page, [1, 4], [8, 4]);
+  const p = await point(page, 2, 4);
+  await page.mouse.click(p.x, p.y, { button: 'right' });
+  expect(await cell(page, 2, 4)).toBeNull();
+  await rightDrag(page, [4, 4], [7, 4]);
+  expect(await cell(page, 4, 4)).toBeNull();
+  expect(await cell(page, 7, 4)).toBeNull();
+  expect((await cell(page, 3, 4))?.block).toBeDefined();
+  expect((await cell(page, 8, 4))?.block).toBeDefined();
+  await page.getByTestId('undo').click(); // the right-drag is one step
+  expect((await cell(page, 5, 4))?.block).toBeDefined();
+});
+
+test('T7: right-click and a finished delete both clear the selection', async ({ page }) => {
+  await click(page, 2, 3);
+  await pickTool(page, 'select');
+  await click(page, 2, 3);
+  expect(await selection(page)).not.toBeNull();
+  const p = await point(page, 6, 6);
+  await page.mouse.click(p.x, p.y, { button: 'right' });
+  expect(await selection(page)).toBeNull();
+  expect((await cell(page, 2, 3))?.block).toBeDefined(); // Select's right-click does not erase
+  await click(page, 2, 3);
+  await page.keyboard.press('Delete');
+  expect(await cell(page, 2, 3)).toBeNull();
+  expect(await selection(page)).toBeNull();
+});
+
+test('T8: Audio Gear is a palette block; clicking it again opens the editor and keeps the note below', async ({ page }) => {
+  await click(page, 4, 4); // a note
+  await page.getByTestId(`palette-${profile.gear.defaultType}`).click();
+  await click(page, 4, 4); // gear onto the note
+  expect((await cell(page, 4, 4))?.gear).toBeDefined();
+  expect((await cell(page, 4, 4))?.block).toBeDefined();
+  await expect(page.getByTestId('gear-form')).toHaveCount(0);
+  await click(page, 4, 4); // gear over a gear: opens the editor, deletes nothing
+  await expect(page.getByTestId('gear-form')).toBeVisible();
+  expect((await cell(page, 4, 4))?.gear).toBeDefined();
+  expect((await cell(page, 4, 4))?.block).toBeDefined();
+  // The grid: one note per column, a second note in the column replaces the first.
+  await page.getByTestId('gear-grid-0-2').click();
+  await page.getByTestId('gear-grid-0-5').click();
+  await page.getByTestId('gear-grid-1-3').click();
+  await expect(page.getByTestId('gear-grid-0-2')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByTestId('gear-grid-0-5')).toHaveAttribute('aria-pressed', 'true');
+  // Clicking outside saves and closes.
+  await page.getByTestId('strip-minimap').click();
+  await expect(page.getByTestId('gear-form')).toHaveCount(0);
+  expect((await cell(page, 4, 4))?.gear?.notes).toHaveLength(2);
+  expect((await cell(page, 4, 4))?.block).toBeDefined();
+  // Dragging from a gear does nothing.
+  const before = await cellCount(page);
+  await drag(page, [4, 4], [10, 4]);
+  expect(await cellCount(page)).toBe(before);
+});
+
+test('T8: clicking another gear saves the previous one', async ({ page }) => {
+  await page.getByTestId(`palette-${profile.gear.defaultType}`).click();
+  await click(page, 2, 2);
+  await click(page, 6, 2);
+  await click(page, 2, 2);
+  await page.getByTestId('gear-grid-0-4').click();
+  await click(page, 6, 2);
+  expect((await cell(page, 2, 2))?.gear?.notes).toHaveLength(1);
+  await expect(page.getByTestId('gear-form')).toBeVisible();
+});
+
+test('T10: right-click a block, press a key to bind it, Escape removes it, the toggle turns shortcuts off', async ({ page }) => {
+  const id = `palette-${secondInstrument}:natural`;
+  await page.getByTestId(id).click({ button: 'right' });
+  await page.keyboard.press('q');
+  await expect(page.getByTestId(`shortcut-${secondInstrument}:natural`)).toHaveText('Q');
+  await page.keyboard.press('q');
+  await click(page, 3, 3);
+  expect((await cell(page, 3, 3))?.block).toMatchObject({ instrument: secondInstrument });
+  await page.getByTestId('shortcuts-toggle').uncheck();
+  await page.getByTestId(`palette-${firstInstrument}:natural`).click();
+  await page.keyboard.press('q');
+  await click(page, 4, 3);
+  expect((await cell(page, 4, 3))?.block).toMatchObject({ instrument: firstInstrument });
+  await page.getByTestId('shortcuts-toggle').check();
+  await page.getByTestId(id).click({ button: 'right' });
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId(`shortcut-${secondInstrument}:natural`)).toHaveCount(0);
+});
+
+test('T9: rows get a colour band that Settings can change', async ({ page }) => {
+  await page.getByTestId('settings-button').click();
+  await expect(page.getByTestId('row-colors')).toHaveValue('spectrum');
+  await page.getByTestId('row-colors').selectOption('none');
+  await page.getByTestId('settings-close').click();
+  await expect(page.getByTestId('strip-canvas')).toBeVisible();
 });

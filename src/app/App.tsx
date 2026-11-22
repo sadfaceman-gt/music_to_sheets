@@ -2,7 +2,18 @@ import { useEffect, useState } from 'react';
 import { parseGameProfile } from '../core/profile/schema.ts';
 import type { GameProfile } from '../core/profile/schema.ts';
 import { Editor } from '../editor/Editor.tsx';
+import { DEFAULT_ROW_COLOR_PROFILE, rowColorProfile } from '../editor/view/rowColors.ts';
 import { SettingsPanel } from './SettingsPanel.tsx';
+
+const ROW_COLORS_KEY = 'mts.rowColors';
+
+function loadRowColors(): string {
+  try {
+    return rowColorProfile(localStorage.getItem(ROW_COLORS_KEY) ?? DEFAULT_ROW_COLOR_PROFILE).id;
+  } catch {
+    return DEFAULT_ROW_COLOR_PROFILE;
+  }
+}
 
 type Load = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; profile: GameProfile };
 
@@ -16,6 +27,15 @@ async function loadProfile(): Promise<GameProfile> {
 export function App() {
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [rowColors, setRowColors] = useState(loadRowColors);
+  const chooseRowColors = (id: string) => {
+    setRowColors(id);
+    try {
+      localStorage.setItem(ROW_COLORS_KEY, id);
+    } catch {
+      // Storage can be blocked; the choice then lasts for this visit only.
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -53,12 +73,12 @@ export function App() {
           <p className="mt-2 text-sm text-slate-400">Reload the page to try again.</p>
         </div>
       )}
-      {load.state === 'ready' && <Editor profile={load.profile} />}
+      {load.state === 'ready' && <Editor profile={load.profile} rowColors={rowColors} />}
       <footer className="border-t border-slate-800 px-3 py-1 text-xs text-slate-500">
         Unofficial fan tool, not affiliated with or endorsed by Ubisoft. Growtopia is a trademark of its owner. Your audio
         stays on your device.
       </footer>
-      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} rowColors={rowColors} onRowColors={chooseRowColors} />}
     </div>
   );
 }

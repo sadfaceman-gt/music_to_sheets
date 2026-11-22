@@ -3,6 +3,7 @@ import { produce } from 'immer';
 import profileJson from '../../../public/profiles/growtopia-default.json';
 import { parseGameProfile } from '../../../src/core/profile/schema';
 import {
+  BEDROCK_NOTICE,
   cellLabel,
   copy,
   duplicate,
@@ -89,17 +90,17 @@ describe('paint', () => {
     expect(paint(profile, s, { col: 0, row: 0 }, entry('piano:natural'))).toEqual({ changed: 0, messages: [] });
   });
 
-  it('refuses every sheet block on bedrock cells with a message', () => {
+  it('allows every sheet block on bedrock cells, with a notice that they become Racks at export (T11)', () => {
     const s = fresh(400);
-    for (const id of ['piano:natural', 'blank', 'repeatBegin', 'repeatEnd']) {
-      const r = paint(profile, s, { col: 300, row: 12 }, entry(id));
-      expect(r.changed).toBe(0);
-      expect(r.messages[0]).toContain('col 300, row d');
+    for (const [i, id] of ['piano:natural', 'blank', 'repeatBegin', 'repeatEnd'].entries()) {
+      const r = paint(profile, s, { col: 300 + i, row: 12 }, entry(id));
+      expect(r.changed).toBe(1);
+      expect(r.messages).toEqual([BEDROCK_NOTICE]);
     }
-    expect(s.cells).toEqual({});
-    // Not bedrock: other page, other rows.
-    expect(paint(profile, s, { col: 299, row: 12 }, entry('piano:natural')).changed).toBe(1);
-    expect(paint(profile, s, { col: 300, row: 11 }, entry('piano:natural')).changed).toBe(1);
+    expect(Object.keys(s.cells)).toHaveLength(4);
+    // Not bedrock: other page, other rows: no notice.
+    expect(paint(profile, s, { col: 299, row: 12 }, entry('piano:natural'))).toEqual({ changed: 1, messages: [] });
+    expect(paint(profile, s, { col: 300, row: 11 }, entry('piano:natural'))).toEqual({ changed: 1, messages: [] });
   });
 
   it('allows Gear and Rack on bedrock', () => {
@@ -205,14 +206,14 @@ describe('copy / paste', () => {
     expect(getCell(s, 0, 0)).toEqual(noteCell('piano'));
   });
 
-  it('keeps native blocks off bedrock when pasting', () => {
+  it('pastes native blocks onto bedrock with one notice (T11)', () => {
     const s = fresh(400);
     put(s, 0, 0, noteCell('piano'));
     put(s, 1, 0, { ...noteCell('piano'), gear: gearOf([gn('piano', 'c')]) });
     const r = paste(profile, s, { col: 300, row: 12 }, copy(s, rect(0, 0, 1, 0)));
-    expect(r.messages).toHaveLength(2);
-    expect(getCell(s, 300, 12)).toBeUndefined();
-    expect(getCell(s, 301, 12)).toEqual({ gear: gearOf([gn('piano', 'c')]) });
+    expect(r.messages).toEqual([BEDROCK_NOTICE]);
+    expect(getCell(s, 300, 12)).toEqual(noteCell('piano'));
+    expect(getCell(s, 301, 12)).toEqual({ ...noteCell('piano'), gear: gearOf([gn('piano', 'c')]) });
   });
 });
 
@@ -388,13 +389,14 @@ describe('transpose', () => {
     expect(kinds.sort()).toEqual(['bass', 'piano']); // nothing lost
   });
 
-  it('refuses to transpose into bedrock', () => {
+  it('transposes into bedrock with a notice (T11)', () => {
     const s = fresh(400);
     put(s, 300, ROW_E_LOW, noteCell('piano')); // file 5 -> 3 (d, row 12 = bedrock)
     const r = transpose(profile, s, rect(300, 0, 300, 13), -2);
-    expect(r.changed).toBe(0);
-    expect(r.messages[0]).toContain('bedrock');
-    expect(getCell(s, 300, ROW_E_LOW)).toEqual(noteCell('piano'));
+    expect(r.changed).toBe(1);
+    expect(r.messages).toEqual([BEDROCK_NOTICE]);
+    expect(getCell(s, 300, ROW_E_LOW)).toBeUndefined();
+    expect(getCell(s, 300, 12)?.block).toMatchObject({ type: 'note', instrument: 'piano' });
   });
 
   it('transposes Gear notes too, and reports the ones it cannot', () => {

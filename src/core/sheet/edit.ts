@@ -44,6 +44,9 @@ export interface Clipboard {
 
 const MAX_MESSAGES = 20;
 
+/** Shown when native blocks end up under bedrock: they are kept, and become Audio Racks at export (Design 2.6). */
+export const BEDROCK_NOTICE = 'Blocks under bedrock will be converted to Audio Racks during export';
+
 /** "col 3, row E" (column 0-based). One place to change if the UI numbers columns differently. */
 export function cellLabel(profile: GameProfile, col: number, row: number): string {
   return `col ${col}, row ${letterOfRow(profile, row) ?? '#' + row}`;
@@ -102,14 +105,13 @@ export function paint(profile: GameProfile, sheet: Sheet, pos: CellPos, entry: P
   }
 
   const block = entry.paint.block;
-  if (isBedrock(profile, pos.col, pos.row)) return refuse(`${label}: under bedrock, only an Audio Gear or Rack can go here`);
   if (block.type === 'note' && fileOf(profile, pos.row, block) === null) {
     return refuse(`${label}: ${entry.label} isn't a valid note on this row`);
   }
   if (cellsEqual({ block }, existing?.block ? { block: existing.block } : undefined)) return { changed: 0, messages: [] };
   setBlock(sheet, pos.col, pos.row, { ...block });
   growTo(sheet, pos.col);
-  return { changed: 1, messages: [] };
+  return { changed: 1, messages: isBedrock(profile, pos.col, pos.row) ? [BEDROCK_NOTICE] : [] };
 }
 
 export function erase(_profile: GameProfile, sheet: Sheet, rect: CellRect): EditReport {
@@ -144,9 +146,10 @@ function planPaste(
   sheet: Sheet,
   pos: CellPos,
   clip: Clipboard,
-): { writes: PasteWrite[]; problems: string[] } {
+): { writes: PasteWrite[]; problems: string[]; notices: string[] } {
   const writes: PasteWrite[] = [];
   const problems: string[] = [];
+  const notices: string[] = [];
   const entries = Object.keys(clip.cells)
     .map((key) => ({ ...parseCellKey(key), cell: clip.cells[key] as Cell }))
     .sort((a, b) => a.col - b.col || a.row - b.row);
@@ -158,18 +161,10 @@ function planPaste(
       problems.push(`${label}: outside the sheet, dropped`);
       continue;
     }
-    if (cell.block && isBedrock(profile, col, row)) {
-      if (cell.gear) {
-        writes.push({ col, row, cell: { gear: cell.gear } });
-        problems.push(`${label}: under bedrock, kept only its Gear`);
-      } else {
-        problems.push(`${label}: under bedrock, dropped`);
-      }
-      continue;
-    }
+    if (cell.block && isBedrock(profile, col, row) && !notices.includes(BEDROCK_NOTICE)) notices.push(BEDROCK_NOTICE);
     writes.push({ col, row, cell });
   }
-  return { writes, problems };
+  return { writes, problems, notices };
 }
 
 function applyWrites(sheet: Sheet, writes: PasteWrite[]): number {
@@ -185,8 +180,9 @@ function applyWrites(sheet: Sheet, writes: PasteWrite[]): number {
 
 export function paste(profile: GameProfile, sheet: Sheet, pos: CellPos, clip: Clipboard): EditReport {
   const rep = reporter();
-  const { writes, problems } = planPaste(profile, sheet, pos, clip);
+  const { writes, problems, notices } = planPaste(profile, sheet, pos, clip);
   problems.forEach((p) => rep.add(p));
+  notices.forEach((p) => rep.add(p));
   return rep.finish(applyWrites(sheet, writes));
 }
 
@@ -200,7 +196,7 @@ export function move(profile: GameProfile, sheet: Sheet, rect: CellRect, dCol: n
   if (!Number.isInteger(dCol) || !Number.isInteger(dRow)) return { ...refuse('Move needs whole columns and rows'), moved: false };
   if (dCol === 0 && dRow === 0) return { changed: 0, messages: [], moved: true };
   const clip = copy(sheet, rect);
-  const { writes, problems } = planPaste(profile, sheet, { col: rect.col0 + dCol, row: rect.row0 + dRow }, clip);
+  const { writes, problems, notices } = planPaste(profile, sheet, { col: rect.col0 + dCol, row: rect.row0 + dRow }, clip);
   if (problems.length > 0) {
     const rep = reporter();
     rep.add('Nothing moved:');
@@ -210,7 +206,7 @@ export function move(profile: GameProfile, sheet: Sheet, rect: CellRect, dCol: n
   const sources = cellsInRect(sheet, rect);
   for (const { col, row } of sources) setCell(sheet, col, row, undefined);
   applyWrites(sheet, writes);
-  return { changed: sources.length, messages: [], moved: true };
+  return { changed: sources.length, messages: notices, moved: true };
 }
 
 export interface DuplicateReport extends EditReport {
@@ -287,8 +283,7 @@ export function transpose(profile: GameProfile, sheet: Sheet, rect: CellRect, se
       const targetKey = cellKey(c.col, c.to.row);
       const label = cellLabel(profile, c.col, c.row);
       let reason: string | null = null;
-      if (isBedrock(profile, c.col, c.to.row)) reason = 'target is under bedrock';
-      else if (sheet.cells[targetKey]?.block && !moving.has(targetKey)) reason = 'target cell is taken';
+      if (sheet.cells[targetKey]?.block && !moving.has(targetKey)) reason = 'target cell is taken';
       else if (claimed.has(targetKey)) reason = 'target cell is taken by another moving note';
       if (reason) {
         rep.add(`${label}: ${reason}, left unchanged`);
@@ -307,6 +302,7 @@ export function transpose(profile: GameProfile, sheet: Sheet, rect: CellRect, se
     setBlock(sheet, c.col, c.to.row, { type: 'note', instrument: c.block.instrument, accidental: c.to.accidental });
     moved.set(c.key, c.to.row);
   }
+  if (candidates.some((c) => isBedrock(profile, c.col, c.to.row))) rep.add(BEDROCK_NOTICE);
   let changed = candidates.length;
 
   // Gear notes.

@@ -1,5 +1,5 @@
 # Never commit: user-supplied game samples, test songs/stems, design export, model weights
-notes/
+proprietary/
 test/
 DESIGN.md
 DEVELOPMENT.md

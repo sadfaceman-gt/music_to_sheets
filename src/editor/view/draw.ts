@@ -17,6 +17,8 @@ export interface DrawParams {
   width: number;
   height: number;
   dpr: number;
+  /** Background colour per row (null = none); see rowColors.ts. */
+  rowBands?: (string | null)[];
 }
 
 const FONT = 'system-ui, sans-serif';
@@ -40,7 +42,16 @@ export function draw(ctx: CanvasRenderingContext2D, p: DrawParams): void {
   ctx.clip();
 
   if (last >= first) {
-    // Backgrounds: world-unsupported tint and bedrock shading.
+    // Row bands, then the world-unsupported tint and bedrock shading.
+    if (p.rowBands) {
+      const x0 = cellOrigin(vp, first, 0).x;
+      const x1 = cellOrigin(vp, last + 1, 0).x;
+      p.rowBands.forEach((band, row) => {
+        if (!band) return;
+        ctx.fillStyle = band;
+        ctx.fillRect(x0, HEADER_H + row * cs, x1 - x0, cs);
+      });
+    }
     for (let col = first; col <= last; col++) {
       const { x } = cellOrigin(vp, col, 0);
       if (isPastWorldLimit(profile, col)) {

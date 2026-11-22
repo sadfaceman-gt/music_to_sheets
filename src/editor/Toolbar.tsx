@@ -22,6 +22,8 @@ export interface ToolbarProps {
   hasSelection: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  shortcutsEnabled: boolean;
+  onToggleShortcuts: () => void;
   onUndo: () => void;
   onRedo: () => void;
   onTranspose: (semitones: number) => void;
@@ -124,7 +126,11 @@ export function Toolbar(p: ToolbarProps) {
         </button>
       </div>
 
-      <div className="ml-auto flex gap-1">
+      <div className="ml-auto flex items-center gap-1">
+        <label className="mr-2 flex items-center gap-1 text-sm text-slate-400" title="One-key shortcuts for tools and blocks (Ctrl combos always work)">
+          <input type="checkbox" data-testid="shortcuts-toggle" checked={p.shortcutsEnabled} onChange={p.onToggleShortcuts} />
+          Shortcuts
+        </label>
         <button type="button" data-testid="undo" aria-label="Undo" title="Undo (Ctrl+Z)" disabled={!p.canUndo} onClick={p.onUndo} className={btn}>
           Undo
         </button>

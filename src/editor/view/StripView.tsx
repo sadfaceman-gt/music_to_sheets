@@ -3,6 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { GameProfile } from '../../core/profile/schema.ts';
 import type { CellPos, CellRect, Sheet } from '../../core/sheet/types.ts';
 import { draw, drawMinimap } from './draw.ts';
+import { DEFAULT_ROW_COLOR_PROFILE, rowBands } from './rowColors.ts';
 import {
   cellAt,
   cellAtClamped,
@@ -34,6 +35,8 @@ export interface StripViewProps {
   selection: CellRect | null;
   /** CSS cursor for the canvas (the active tool sets it). */
   cursor?: string;
+  /** Row colour profile id (rowColors.ts). */
+  rowColors?: string;
   onCellPointer?: (e: CellPointerEvent) => void;
   onViewportChange?: (vp: Viewport) => void;
 }
@@ -57,7 +60,7 @@ function fitCanvas(canvas: HTMLCanvasElement, w: number, h: number, dpr: number)
   return canvas.getContext('2d');
 }
 
-export function StripView({ profile, sheet, selection, cursor, onCellPointer, onViewportChange }: StripViewProps) {
+export function StripView({ profile, sheet, selection, cursor, rowColors, onCellPointer, onViewportChange }: StripViewProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const miniRef = useRef<HTMLCanvasElement>(null);
@@ -121,13 +124,13 @@ export function StripView({ profile, sheet, selection, cursor, onCellPointer, on
       const dpr = window.devicePixelRatio || 1;
       const canvas = canvasRef.current;
       const ctx = canvas && fitCanvas(canvas, size.w, size.h, dpr);
-      if (ctx) draw(ctx, { profile, sheet, viewport: vp, selection, hover, width: size.w, height: size.h, dpr });
+      if (ctx) draw(ctx, { profile, sheet, viewport: vp, selection, hover, width: size.w, height: size.h, dpr, rowBands: rowBands(rowColors ?? DEFAULT_ROW_COLOR_PROFILE, sheet.rows) });
       const mini = miniRef.current;
       const mctx = mini && fitCanvas(mini, size.w, MINIMAP_H, dpr);
       if (mctx) drawMinimap(mctx, { profile, sheet, viewport: vp, mainWidth: size.w, width: size.w, height: MINIMAP_H, dpr });
     });
     return () => cancelAnimationFrame(id);
-  }, [profile, sheet, selection, hover, vp, size]);
+  }, [profile, sheet, selection, hover, vp, size, rowColors]);
 
   // Wheel: scroll, or zoom with Ctrl/Cmd. Needs a non-passive listener to preventDefault.
   useEffect(() => {

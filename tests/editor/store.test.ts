@@ -42,7 +42,7 @@ describe('editor store', () => {
 
   it('adds no undo step for edits that change nothing, and reports refusals', () => {
     const s = store(400);
-    s.getState().paint({ col: 300, row: 12 });
+    s.getState().paint({ col: 0, row: 99 }); // outside the sheet
     expect(s.getState().undoDepth).toBe(0);
     expect(s.getState().lastReport).toHaveLength(1);
     s.getState().paint({ col: 0, row: 0 });
@@ -54,6 +54,25 @@ describe('editor store', () => {
     s.getState().deleteSelection();
     s.getState().transpose(1);
     expect(s.getState().undoDepth).toBe(1);
+  });
+
+  it('clears the selection once a delete or cut completes (T7)', () => {
+    const s = store();
+    s.getState().paint({ col: 0, row: 0 });
+    s.getState().setSelection(rect(0, 0, 1, 1));
+    s.getState().deleteSelection();
+    expect(s.getState().selection).toBeNull();
+    s.getState().paint({ col: 0, row: 0 });
+    s.getState().setSelection(rect(0, 0, 1, 1));
+    s.getState().cut();
+    expect(s.getState().selection).toBeNull();
+  });
+
+  it('reports a delete with no selection', () => {
+    const s = store();
+    s.getState().deleteSelection();
+    expect(s.getState().selection).toBeNull();
+    expect(s.getState().lastReport).toEqual(['Nothing is selected']);
   });
 
   it('clears redo on a new edit', () => {

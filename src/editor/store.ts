@@ -171,7 +171,7 @@ export function createEditorStore(profile: GameProfile, cols?: number): EditorSt
         }
         const clipboard = edit.copy(sheet, selection);
         run('Cut', (s, p) => edit.erase(p, s, selection));
-        set({ clipboard });
+        set({ clipboard, selection: null });
       },
 
       paste(pos) {
@@ -189,7 +189,8 @@ export function createEditorStore(profile: GameProfile, cols?: number): EditorSt
       },
 
       deleteSelection() {
-        withSelection('Delete', (sheet, p, rect) => edit.erase(p, sheet, rect));
+        // The selection goes away once the delete is done (T7).
+        if (withSelection('Delete', (sheet, p, rect) => edit.erase(p, sheet, rect))) set({ selection: null });
       },
 
       moveSelection(dCol, dRow) {
