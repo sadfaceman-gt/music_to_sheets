@@ -24,9 +24,23 @@ export interface DrawParams {
   ghost?: Cell | null;
   /** The measure bar picked for a time signature change (T19). */
   selectedBar?: number | null;
+  /** The player's block images by block kind id (palette id; Rack shares "gear"); a kind without one keeps its original icon. */
+  icons?: ReadonlyMap<string, ImageBitmap>;
+  /** Column under the playhead while playing. */
+  playhead?: number | null;
 }
 
 const FONT = 'system-ui, sans-serif';
+
+/** Counts game images drawn since the page loaded (Playwright reads it to see that "Your game images" is in use). */
+export const drawStats = { images: 0 };
+
+/** Block kind id of a cell's block (the palette id, see core/blockImages), or null for a Gear-only cell. */
+function iconKey(cell: Cell): string | null {
+  const block = cell.block;
+  if (!block) return cell.gear ? 'gear' : null;
+  return block.type === 'note' ? `${block.instrument}:${block.accidental}` : block.type;
+}
 
 export function draw(ctx: CanvasRenderingContext2D, p: DrawParams): void {
   const { profile, sheet, viewport: vp, width, height } = p;
@@ -154,7 +168,7 @@ export function draw(ctx: CanvasRenderingContext2D, p: DrawParams): void {
         const cell = sheet.cells[cellKey(col, row)];
         if (!cell) continue;
         const { x, y } = cellOrigin(vp, col, row);
-        drawCell(ctx, profile, cell, x, y, cs, colors, isBedrock(profile, col, row));
+        drawCell(ctx, profile, cell, x, y, cs, colors, isBedrock(profile, col, row), p.icons);
       }
     }
   }
@@ -180,7 +194,7 @@ export function draw(ctx: CanvasRenderingContext2D, p: DrawParams): void {
     ctx.strokeRect(x + 0.5, y + 0.5, cs - 1, cs - 1);
     if (p.ghost) {
       ctx.globalAlpha = 0.55;
-      drawCell(ctx, profile, p.ghost, x, y, cs, colors, isBedrock(profile, p.hover.col, p.hover.row));
+      drawCell(ctx, profile, p.ghost, x, y, cs, colors, isBedrock(profile, p.hover.col, p.hover.row), p.icons);
       ctx.globalAlpha = 1;
     }
   }
@@ -194,6 +208,17 @@ export function draw(ctx: CanvasRenderingContext2D, p: DrawParams): void {
     ctx.strokeStyle = THEME.selectionStroke;
     ctx.lineWidth = 2;
     ctx.strokeRect(a.x + 1, a.y + 1, w - 2, h - 2);
+  }
+  if (p.playhead != null) {
+    const { x } = cellOrigin(vp, p.playhead, 0);
+    ctx.fillStyle = THEME.playheadFill;
+    ctx.fillRect(x, HEADER_H, cs, gridBottom - HEADER_H);
+    ctx.strokeStyle = THEME.playhead;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x + cs / 2, HEADER_H);
+    ctx.lineTo(x + cs / 2, gridBottom);
+    ctx.stroke();
   }
   ctx.restore();
 
@@ -330,6 +355,7 @@ function drawCell(
   cs: number,
   colors: Map<string, string>,
   bedrock: boolean,
+  icons?: ReadonlyMap<string, ImageBitmap>,
 ): void {
   const pad = Math.max(1, cs * 0.12);
   const s = cs - pad * 2;
@@ -337,9 +363,19 @@ function drawCell(
   const by = y + pad;
   const block = cell.block;
   const showText = cs >= 14;
+  const key = iconKey(cell);
+  const image = key === null ? undefined : icons?.get(key);
 
+  if (image && !block) {
+    // A Gear on an empty tile: the game's Gear image, with the badge below on top of it.
+    ctx.drawImage(image, bx, by, s, s);
+    drawStats.images++;
+  }
   if (block) {
-    if (block.type === 'note') {
+    if (image) {
+      ctx.drawImage(image, bx, by, s, s);
+      drawStats.images++;
+    } else if (block.type === 'note') {
       const fill = colors.get(block.instrument) ?? THEME.blank;
       roundedRect(ctx, bx, by, s, s, s * 0.22);
       ctx.fillStyle = fill;
@@ -439,6 +475,8 @@ export interface MinimapParams {
   width: number;
   height: number;
   dpr: number;
+  /** Column under the playhead while playing. */
+  playhead?: number | null;
 }
 
 export function drawMinimap(ctx: CanvasRenderingContext2D, p: MinimapParams): void {
@@ -494,6 +532,16 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, p: MinimapParams): vo
   ctx.moveTo(Math.round(wx), 0);
   ctx.lineTo(Math.round(wx), height);
   ctx.stroke();
+
+  if (p.playhead != null) {
+    const px = Math.round(minimapX(p.playhead, width, total)) + 0.5;
+    ctx.strokeStyle = THEME.playhead;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(px, 0);
+    ctx.lineTo(px, height);
+    ctx.stroke();
+  }
 
   const span = viewCols(vp, p.mainWidth);
   const x0 = minimapX(vp.scrollCol, width, total);

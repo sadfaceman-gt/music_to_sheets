@@ -1,5 +1,8 @@
 import { useEffect } from 'react';
 import { ROW_COLOR_PROFILES } from '../editor/view/rowColors.ts';
+import type { AudioSession } from './audioSession.ts';
+import { BlockImagesSection } from './BlockImagesSection.tsx';
+import { SoundsSection } from './SoundsSection.tsx';
 import { StartupReport } from './StartupReport.tsx';
 
 /** Modal Settings dialog. Holds the startup report for now. Escape or the Close button dismisses it. */
@@ -7,10 +10,12 @@ export function SettingsPanel({
   onClose,
   rowColors,
   onRowColors,
+  session,
 }: {
   onClose: () => void;
   rowColors: string;
   onRowColors: (id: string) => void;
+  session: AudioSession | null;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -59,6 +64,22 @@ export function SettingsPanel({
             </select>
           </label>
         </section>
+        {session && (
+          <>
+            <section className="mb-4" aria-labelledby="settings-sounds">
+              <h3 id="settings-sounds" className="mb-1 text-lg font-semibold">
+                Sounds
+              </h3>
+              <SoundsSection session={session} />
+            </section>
+            <section className="mb-4" aria-labelledby="settings-images">
+              <h3 id="settings-images" className="mb-1 text-lg font-semibold">
+                Block images
+              </h3>
+              <BlockImagesSection session={session} />
+            </section>
+          </>
+        )}
         <StartupReport />
       </div>
     </div>

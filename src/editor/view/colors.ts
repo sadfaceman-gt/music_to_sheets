@@ -54,4 +54,6 @@ export const THEME = {
   hoverStroke: 'rgba(255, 255, 255, 0.5)',
   minimapWindowFill: 'rgba(80, 160, 255, 0.15)',
   minimapWindowStroke: '#50a0ff',
+  playheadFill: 'rgba(255, 210, 74, 0.16)',
+  playhead: '#ffd24a',
 } as const;
