@@ -1,3 +1,4 @@
+import { produce } from 'immer';
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
 import type { StoreApi } from 'zustand/vanilla';
@@ -38,6 +39,13 @@ export interface EditorActions {
   swapInstrument(instrument: string): void;
   setVolume(volume: number): void;
   setGear(pos: CellPos, gear: GearBlock | null): void;
+  /**
+   * Starts a batch: every edit until endBatch() shows up immediately but becomes one undo step (a paint drag).
+   * Undo and redo are ignored while a batch is open. Starting a batch while one is open ends the old one first.
+   */
+  beginBatch(label: string): void;
+  /** Ends the batch; the whole batch is one undo step, or none when nothing changed. */
+  endBatch(): void;
   selectPalette(id: string): void;
   undo(): void;
   redo(): void;
@@ -61,6 +69,7 @@ function clipRect(rect: CellRect, sheet: Sheet): CellRect {
 /** A store for one editor session. Every edit action is exactly one undo step, and none when nothing changed. */
 export function createEditorStore(profile: GameProfile, cols?: number): EditorStore {
   const history = createHistory<Sheet>();
+  let batch: { base: Sheet; label: string; messages: Set<string> } | null = null;
   const depths = () => ({ undoDepth: history.undoDepth(), redoDepth: history.redoDepth() });
 
   return createStore<EditorState & EditorActions>()((set, get) => {
@@ -68,6 +77,15 @@ export function createEditorStore(profile: GameProfile, cols?: number): EditorSt
     function run<R extends EditReport>(label: string, fn: (sheet: Sheet, profile: GameProfile) => R): R | null {
       const { sheet, profile } = get();
       let report: R | null = null;
+      if (batch) {
+        const open = batch;
+        const edited = produce(sheet, (draft) => {
+          report = fn(draft, profile);
+        });
+        for (const m of (report as R | null)?.messages ?? []) open.messages.add(m);
+        set({ sheet: edited, lastReport: [...open.messages] });
+        return report;
+      }
       const next = history.record(
         sheet,
         (draft) => {
@@ -103,6 +121,7 @@ export function createEditorStore(profile: GameProfile, cols?: number): EditorSt
       redoDepth: 0,
 
       init(nextProfile, nextCols) {
+        batch = null;
         history.clear();
         set({
           profile: nextProfile,
@@ -204,17 +223,40 @@ export function createEditorStore(profile: GameProfile, cols?: number): EditorSt
         run('Gear', (sheet, p) => edit.setGear(p, sheet, pos, gear));
       },
 
+      beginBatch(label) {
+        get().endBatch();
+        batch = { base: get().sheet, label, messages: new Set() };
+      },
+
+      endBatch() {
+        if (!batch) return;
+        const { base, label } = batch;
+        batch = null;
+        const final = get().sheet;
+        if (final === base) return;
+        // Record base -> final as one step (the interim states never went into the history).
+        const next = history.record(
+          base,
+          (draft) => {
+            draft.cols = final.cols;
+            draft.cells = final.cells;
+          },
+          label,
+        );
+        set({ sheet: next, ...depths() });
+      },
+
       selectPalette(id) {
         if (paletteEntries(get().profile).some((e) => e.id === id)) set({ paletteId: id });
       },
 
       undo() {
-        if (!history.canUndo()) return;
+        if (batch || !history.canUndo()) return;
         set({ sheet: history.undo(get().sheet), lastReport: [], ...depths() });
       },
 
       redo() {
-        if (!history.canRedo()) return;
+        if (batch || !history.canRedo()) return;
         set({ sheet: history.redo(get().sheet), lastReport: [], ...depths() });
       },
 
