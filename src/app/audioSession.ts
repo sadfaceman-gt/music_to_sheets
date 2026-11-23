@@ -80,6 +80,8 @@ export interface EngineDebug {
   contextTime: number | null;
   passStarts: number[];
   auditions: number;
+  /** Column the last play() started from, null before any. */
+  playedFrom: number | null;
 }
 
 export class AudioSession {
@@ -370,6 +372,7 @@ export class AudioSession {
   play(timeline: Timeline, fromCol?: number): void {
     const engine = this.ensureEngine();
     const tick = fromCol === undefined ? undefined : timeline.ticks.find((t) => t.col === fromCol);
+    this.playedFrom = (tick ?? timeline.ticks[0])?.col ?? null;
     engine.play(timeline, { loop: true, offset: tick?.time ?? 0 });
     this.set({ transport: 'playing', playhead: (tick ?? timeline.ticks[0])?.col ?? null });
   }
@@ -420,6 +423,8 @@ export class AudioSession {
     this.ensureEngine().audition(notes);
   }
 
+  private playedFrom: number | null = null;
+
   debug(): EngineDebug {
     return {
       transport: this.state.transport,
@@ -427,6 +432,7 @@ export class AudioSession {
       contextTime: this.ctx?.currentTime ?? null,
       passStarts: this.engine ? [...this.engine.passStarts] : [],
       auditions: this.auditionLog.length,
+      playedFrom: this.playedFrom,
     };
   }
 

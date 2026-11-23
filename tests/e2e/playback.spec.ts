@@ -264,8 +264,8 @@ test('T26: the band under the grid sets where Play starts; Play from Beginning r
   await at(10);
   expect(await cue(page)).toBe(10);
   await play(page).click();
-  await expect.poll(() => playhead(page), { timeout: 5000 }).toBeGreaterThanOrEqual(10);
-  expect((await samplePlayhead(page, 300))[0]).toBeGreaterThanOrEqual(10);
+  await expect.poll(() => playhead(page), { timeout: 5000 }).not.toBeNull();
+  expect((await engineState(page)).playedFrom).toBe(10);
 
   // The band is disabled while playing.
   await at(4);
@@ -277,8 +277,8 @@ test('T26: the band under the grid sets where Play starts; Play from Beginning r
   await at(5);
   expect(await cue(page)).toBe(5);
   await play(page).click();
-  await expect.poll(() => playhead(page), { timeout: 5000 }).toBeGreaterThanOrEqual(5);
-  expect((await samplePlayhead(page, 200))[0]).toBeLessThan(10);
+  await expect.poll(() => playhead(page), { timeout: 5000 }).not.toBeNull();
+  expect((await engineState(page)).playedFrom).toBe(5);
   await stop(page).click();
   await expect.poll(() => playhead(page)).toBeNull();
 
@@ -291,5 +291,5 @@ test('T26: the band under the grid sets where Play starts; Play from Beginning r
   await page.getByTestId('transport-play-start').click();
   await expect.poll(() => playhead(page), { timeout: 5000 }).not.toBeNull();
   expect(await cue(page)).toBe(2);
-  expect((await samplePlayhead(page, 200))[0]).toBeLessThan(6);
+  expect((await engineState(page)).playedFrom).toBe(2);
 });

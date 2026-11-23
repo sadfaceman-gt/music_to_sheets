@@ -31,6 +31,8 @@ export class PlaybackEngine {
   private timer: ReturnType<typeof setInterval> | null = null;
   private raf: number | null = null;
   private paused = false;
+  /** Audio-clock time the first column sounds (a play-from-column pass starts earlier than that, virtually). */
+  private firstSound = 0;
   private muted: ReadonlySet<string> = new Set();
   private solo: ReadonlySet<string> = new Set();
 
@@ -73,7 +75,8 @@ export class PlaybackEngine {
     this.passes = [];
     this.paused = false;
     void this.ctx.resume();
-    this.cursor = new PassCursor(timeline, options.loop, this.ctx.currentTime + this.startDelay, options.offset ?? 0);
+    this.firstSound = this.ctx.currentTime + this.startDelay;
+    this.cursor = new PassCursor(timeline, options.loop, this.firstSound, options.offset ?? 0);
     this.startTimers();
     this.pump();
   }
@@ -222,7 +225,8 @@ export class PlaybackEngine {
   private emitPosition(): void {
     if (this.paused || this.positionCbs.size === 0) return;
     const latency = Number.isFinite(this.ctx.outputLatency) ? this.ctx.outputLatency : 0;
-    const now = this.ctx.currentTime - latency;
+    // Output latency can put the playhead before the first column; show the first column until it sounds (T26).
+    const now = Math.max(this.ctx.currentTime - latency, this.firstSound);
     for (let i = this.passes.length - 1; i >= 0; i--) {
       const p = this.passes[i]!;
       if (p.start > now) continue;

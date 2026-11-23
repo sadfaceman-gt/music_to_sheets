@@ -9,7 +9,7 @@ export interface MtsHooks {
     getSelection(): unknown;
     getPlayhead(): number | null;
     getCue(): number | null;
-    getEngineState(): { transport: string; contextState: string | null; contextTime: number | null; passStarts: number[]; auditions: number };
+    getEngineState(): { transport: string; contextState: string | null; contextTime: number | null; passStarts: number[]; auditions: number; playedFrom: number | null };
     getSounds(): { expected: number; stored: number; decoded: number; placeholders: boolean; missing: Record<string, number[]> };
     getIconSet(): { mode: 'original' | 'game'; images: number; drawn: number };
     getAuditions(): { instrument: string; file: number; gain: number; col: number; row: number }[][];
