@@ -17,6 +17,10 @@ export interface MtsTestHook {
   getAuditions(): { instrument: string; file: number; gain: number; col: number; row: number }[][];
   getMuteSolo(): { muted: string[]; solo: string[] };
   getUndoDepth(): number;
+  /** The song name (the opened file's name without its extension), null when none. */
+  getSongName(): string | null;
+  /** The last successful Open GMSF: issue counts and whether the sheet can be built in a world; null before any. */
+  getLastImport(): { issues: number; skipped: number; warnings: number; supported: boolean } | null;
 }
 
 declare global {

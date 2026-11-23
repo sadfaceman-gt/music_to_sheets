@@ -53,6 +53,8 @@ export interface EditorActions {
   beginBatch(label: string): void;
   /** Ends the batch; the whole batch is one undo step, or none when nothing changed. */
   endBatch(): void;
+  /** Replaces the whole sheet (Open GMSF) as exactly one undo step; clears the selection and the last report, and ends any open batch first. */
+  replaceSheet(sheet: Sheet, label: string): void;
   selectPalette(id: string): void;
   undo(): void;
   redo(): void;
@@ -290,6 +292,22 @@ export function createEditorStore(profile: GameProfile, cols?: number): EditorSt
           label,
         );
         set({ sheet: next, ...depths() });
+      },
+
+      replaceSheet(next, label) {
+        get().endBatch();
+        const after = history.record(
+          get().sheet,
+          (draft) => {
+            draft.rows = next.rows;
+            draft.cols = next.cols;
+            draft.cells = next.cells;
+            draft.timeSignatures = next.timeSignatures;
+            draft.worldBpm = next.worldBpm;
+          },
+          label,
+        );
+        set({ sheet: after, selection: null, lastReport: [], ...depths() });
       },
 
       selectPalette(id) {

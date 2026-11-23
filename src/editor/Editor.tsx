@@ -5,6 +5,12 @@ import { getCell } from '../core/sheet/sheet.ts';
 import { isMeasureBar } from '../core/sheet/timeSig.ts';
 import { normaliseRect, rectContains } from '../core/sheet/types.ts';
 import type { Cell, CellPos, CellRect, GearBlock, SheetBlock } from '../core/sheet/types.ts';
+import { readGmsf } from '../core/gmsf/read.ts';
+import { worldSupport } from '../core/gmsf/world.ts';
+import { writeGmsf } from '../core/gmsf/write.ts';
+import type { GmsfReadResult, GmsfWriteResult, WorldSupport } from '../core/gmsf/types.ts';
+import { ConfirmOpenDialog, ErrorDialog, ImportReport, SaveDialog } from './GmsfDialogs.tsx';
+import { downloadBytes, importSummary, songNameOf } from './gmsfFile.ts';
 import { GearEditor } from './GearEditor.tsx';
 import { Palette } from './Palette.tsx';
 import { StatusBar } from './StatusBar.tsx';
@@ -34,6 +40,13 @@ type Drag =
   | { kind: 'none' }
   | { kind: 'box'; anchor: CellPos }
   | { kind: 'move'; start: CellPos; orig: CellRect };
+
+type ImportInfo = { issues: number; skipped: number; warnings: number; supported: boolean };
+type GmsfDialog =
+  | { kind: 'error'; fileName: string; result: GmsfReadResult }
+  | { kind: 'confirm'; fileName: string; result: GmsfReadResult; support: WorldSupport }
+  | { kind: 'report'; fileName: string; result: GmsfReadResult; support: WorldSupport }
+  | { kind: 'save'; result: GmsfWriteResult };
 
 function cellRect(p: CellPos): CellRect {
   return { col0: p.col, col1: p.col, row0: p.row, row1: p.row };
@@ -172,6 +185,12 @@ export function Editor({ profile, session, rowColors = DEFAULT_ROW_COLOR_PROFILE
   const [pickedBar, setSelectedBar] = useState<number | null>(null);
   const [gearCell, setGearCell] = useState<{ pos: CellPos; session: number } | null>(null);
   const hoverRef = useRef<CellPos | null>(null);
+  // GMSF import and export (M1c).
+  const [dialog, setDialog] = useState<GmsfDialog | null>(null);
+  const [songName, setSongName] = useState<string | null>(null);
+  const [fileOver, setFileOver] = useState(false);
+  const songNameRef = useRef<string | null>(null);
+  const lastImportRef = useRef<ImportInfo | null>(null);
   const drag = useRef<Drag | null>(null);
 
   // One-key block shortcuts (T10).
@@ -333,6 +352,57 @@ export function Editor({ profile, session, rowColors = DEFAULT_ROW_COLOR_PROFILE
     return () => window.removeEventListener('pointerdown', onPointer, true);
   }, [gearCell, closeGear]);
 
+  const commitOpen = useCallback(
+    (fileName: string, result: GmsfReadResult, support: WorldSupport) => {
+      if (!result.sheet) return;
+      session.stop();
+      store.getState().replaceSheet(result.sheet, 'Open GMSF');
+      setCue(null);
+      const name = songNameOf(fileName);
+      songNameRef.current = name;
+      setSongName(name);
+      const skipped = result.issues.filter((i) => i.severity === 'skipped').length;
+      const warnings = result.issues.filter((i) => i.severity === 'warning').length;
+      lastImportRef.current = { issues: skipped + warnings, skipped, warnings, supported: support.supported };
+      if (skipped + warnings > 0 || !support.supported) setDialog({ kind: 'report', fileName, result, support });
+      else {
+        setDialog(null);
+        store.setState({ lastReport: [`Opened ${fileName}: ${importSummary(result.stats)}`] });
+      }
+    },
+    [session, store],
+  );
+  const openFile = useCallback(
+    async (file: File) => {
+      let result: GmsfReadResult;
+      let support: WorldSupport | null = null;
+      try {
+        result = readGmsf(profile, new Uint8Array(await file.arrayBuffer()));
+        if (result.sheet) support = worldSupport(profile, result.sheet);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        const stats = { bpm: 0, cols: 0, rows: 0, racks: 0, notes: 0, markers: 0 };
+        setDialog({ kind: 'error', fileName: file.name, result: { sheet: null, stats, issues: [{ severity: 'fatal', code: 'truncated', message }] } });
+        return;
+      }
+      if (!result.sheet || !support) {
+        setDialog({ kind: 'error', fileName: file.name, result });
+        return;
+      }
+      if (Object.keys(store.getState().sheet.cells).length > 0) setDialog({ kind: 'confirm', fileName: file.name, result, support });
+      else commitOpen(file.name, result, support);
+    },
+    [profile, store, commitOpen],
+  );
+  const startSave = useCallback(() => {
+    try {
+      setDialog({ kind: 'save', result: writeGmsf(profile, store.getState().sheet) });
+    } catch (e) {
+      store.setState({ lastReport: [`Can't save: ${e instanceof Error ? e.message : String(e)}`] });
+    }
+  }, [profile, store]);
+  const isFileDrag = (e: React.DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+
   // Read-only snapshots for the Playwright tests.
   useEffect(() => {
     window.__mtsTest = {
@@ -354,6 +424,8 @@ export function Editor({ profile, session, rowColors = DEFAULT_ROW_COLOR_PROFILE
       getAuditions: () => session.auditionLog.map((notes) => notes.map((n) => ({ instrument: n.instrument, file: n.file, gain: n.gain, col: n.source.col, row: n.source.row }))),
       getMuteSolo: () => ({ muted: [...session.state.muted], solo: [...session.state.solo] }),
       getUndoDepth: () => store.getState().undoDepth,
+      getSongName: () => songNameRef.current,
+      getLastImport: () => (lastImportRef.current ? { ...lastImportRef.current } : null),
     };
     return () => {
       delete window.__mtsTest;
@@ -513,6 +585,8 @@ export function Editor({ profile, session, rowColors = DEFAULT_ROW_COLOR_PROFILE
         onTranspose={(n) => store.getState().transpose(n)}
         onSwapInstrument={(i) => store.getState().swapInstrument(i)}
         onVolume={(v) => store.getState().setVolume(v)}
+        onOpenFile={(f) => void openFile(f)}
+        onSaveGmsf={startSave}
       />
       <Transport
         profile={profile}
@@ -546,7 +620,32 @@ export function Editor({ profile, session, rowColors = DEFAULT_ROW_COLOR_PROFILE
           onToggleSolo={(i) => session.toggleSolo(i)}
           icons={icons}
         />
-        <div className="min-w-0 flex-1" onPointerLeave={() => updateHover(null)}>
+        <div
+          data-testid="strip-drop"
+          className={`min-w-0 flex-1 ${fileOver ? 'outline outline-2 -outline-offset-2 outline-sky-400' : ''}`}
+          onPointerLeave={() => updateHover(null)}
+          onDragEnter={(e) => {
+            if (!isFileDrag(e)) return;
+            e.preventDefault();
+            setFileOver(true);
+          }}
+          onDragOver={(e) => {
+            if (!isFileDrag(e)) return;
+            e.preventDefault();
+            setFileOver(true);
+          }}
+          onDragLeave={(e) => {
+            if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return;
+            setFileOver(false);
+          }}
+          onDrop={(e) => {
+            setFileOver(false);
+            const file = e.dataTransfer?.files?.[0];
+            if (!file) return;
+            e.preventDefault();
+            void openFile(file);
+          }}
+        >
           <StripView profile={profile} sheet={sheet} selection={selection} cursor={cursor} rowColors={rowColors} ghost={ghost} selectedBar={selectedBar} onBarSelect={setSelectedBar} onCellPointer={onCellPointer} icons={icons} playhead={playhead} follow={follow} cue={cue} onCue={onCue} bandEnabled={transport !== 'playing'} />
         </div>
         {gearCell && (
@@ -568,6 +667,23 @@ export function Editor({ profile, session, rowColors = DEFAULT_ROW_COLOR_PROFILE
           />
         )}
       </div>
+      {dialog?.kind === 'error' && <ErrorDialog fileName={dialog.fileName} issues={dialog.result.issues} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'confirm' && (
+        <ConfirmOpenDialog fileName={dialog.fileName} onCancel={() => setDialog(null)} onOpen={() => commitOpen(dialog.fileName, dialog.result, dialog.support)} />
+      )}
+      {dialog?.kind === 'report' && <ImportReport profile={profile} fileName={dialog.fileName} result={dialog.result} support={dialog.support} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'save' && (
+        <SaveDialog
+          profile={profile}
+          result={dialog.result}
+          fileName={`${songName ?? 'untitled'}.GMSF`}
+          onCancel={() => setDialog(null)}
+          onSave={() => {
+            downloadBytes(`${songName ?? 'untitled'}.GMSF`, dialog.result.bytes);
+            setDialog(null);
+          }}
+        />
+      )}
       <StatusBar profile={profile} sheet={sheet} hover={hover} report={report} onSetColumns={(n) => store.getState().setColumns(n)} selectedBar={selectedBar} onSetSignature={(c, n, m) => store.getState().setTimeSignature(c, n, m)} />
     </div>
   );
