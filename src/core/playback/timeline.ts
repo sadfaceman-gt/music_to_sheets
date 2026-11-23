@@ -146,6 +146,12 @@ export function buildTimeline(profile: GameProfile, sheet: Sheet, options: Timel
     spent.add(`${col},${row}`);
     if (profile.repeats.rearmInner) {
       for (let c = target + 1; c < col; c++) for (const r of endsIn(c)) spent.delete(`${c},${r}`);
+      // Ends stacked in this same column are nested inside the jump when their Begin lies after its target (T29);
+      // an End with no Begin, or an outer one with an earlier Begin, stays as it is.
+      for (const r of endsIn(col)) {
+        const b = beginOf(col, r);
+        if (r !== row && b !== null && b > target) spent.delete(`${col},${r}`);
+      }
     }
     col = target;
   }

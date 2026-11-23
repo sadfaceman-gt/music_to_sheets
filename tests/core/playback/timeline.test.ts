@@ -257,6 +257,27 @@ describe('buildTimeline: repeats', () => {
     expect(cols(sheet).slice(0, 8)).toEqual([0, 1, 2, 3, 4, 2, 3, 4]);
   });
 
+  it('T29: three nested repeats with their Ends in one column replay the inner ones on every outer jump', () => {
+    // Begins at cols 0, 1, 2 (rows 0, 1, 2), a Blank at col 3, all three Ends at col 4.
+    const sheet = sheetOf((s) => {
+      for (let i = 0; i < 3; i++) setBlock(s, i, i, begin);
+      setBlock(s, 3, 5, { type: 'blank' });
+      for (let i = 0; i < 3; i++) setBlock(s, 4, i, end);
+    });
+    // inner; middle then inner; outer, then inner, middle, inner.
+    expect(cols(sheet)).toEqual([0, 1, 2, 3, 4, 2, 3, 4, 1, 2, 3, 4, 2, 3, 4, 0, 1, 2, 3, 4, 2, 3, 4, 1, 2, 3, 4, 2, 3, 4]);
+  });
+
+  it('T29: three nested repeats with their Ends in separate columns play the same way', () => {
+    const sheet = sheetOf((s) => {
+      for (let i = 0; i < 3; i++) setBlock(s, i, i, begin);
+      setBlock(s, 3, 5, { type: 'blank' });
+      for (let i = 0; i < 3; i++) setBlock(s, 4 + i, 2 - i, end);
+    });
+    const c = cols(sheet);
+    expect(c.filter((x) => x === 3)).toHaveLength(8);
+  });
+
   it('deeply nested repeats double per level yet still end', () => {
     // Fourteen nested repeats (one per row) replay about 2^14 times over 28 columns: far past the cap.
     const sheet = sheetOf((s) => {
