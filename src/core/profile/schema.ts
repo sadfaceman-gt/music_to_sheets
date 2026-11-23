@@ -70,12 +70,23 @@ export const gameProfileSchema = z.strictObject({
     foregroundMutes: z.boolean(),
     polyphonyCap: z.int().positive().nullable(),
   }),
+  /**
+   * How Repeat Begin/End blocks play (Design 2.5), measured in-game on 2026-11-23 (Sheet Music - Repeat Mechanics,
+   * scenarios 1-21). All Ends are armed at the start of a pass. The playhead remembers, per row, the last Begin it
+   * flowed through. An End jumps to that Begin, or to the song start when there is none or it lies to the End's right.
+   * Several Ends in a column: one per visit, topmost row first. A jump to column T arms the other Ends whose own
+   * nearest Begin lies after T; flowing through a Begin arms the Ends on its row to its left. Running off the end
+   * of the song resets all of it; a jump to the start carries the state into the next pass.
+   */
   repeats: z.strictObject({
-    match: z.literal('sameNote'),
-    scope: z.literal('anyEarlier'),
+    target: z.literal('lastBeginFlowedThroughOnRow'),
     noBegin: z.literal('songStart'),
-    oncePerLoop: z.boolean(),
-    rearmInner: z.boolean(),
+    endsPerVisit: z.literal(1),
+    endOrder: z.literal('topmostFirst'),
+    rearmOnJump: z.literal('endsWithBeginAfterTarget'),
+    rearmOnBeginPass: z.literal('endsLeftOfBeginOnRow'),
+    passEnd: z.literal('resetAll'),
+    verified: z.string(),
   }),
   gear: z.strictObject({
     maxNotes: z.int().positive(),

@@ -214,17 +214,6 @@ describe('buildTimeline: repeats', () => {
     expect(cols(sheet)).toEqual([0, 1, 2, 3, 4, 2, 3, 4]);
   });
 
-  it('nested repeats replay the inner repeat on every outer pass', () => {
-    // A: Begin row 0 at 0; B: Begin row 1 at 1; inner End row 1 at 2; outer End row 0 at 3.
-    const sheet = sheetOf((s) => {
-      setBlock(s, 0, 0, begin);
-      setBlock(s, 1, 1, begin);
-      setBlock(s, 2, 1, end);
-      setBlock(s, 3, 0, end);
-    });
-    expect(cols(sheet)).toEqual([0, 1, 2, 1, 2, 3, 0, 1, 2, 1, 2, 3]);
-  });
-
   it('with several armed Ends in one column the topmost jumps first and the others stay armed', () => {
     // Row 0 End jumps to its Begin at col 0; row 1 End (no Begin) is still armed and jumps on the next arrival.
     const sheet = sheetOf((s) => {
@@ -233,49 +222,6 @@ describe('buildTimeline: repeats', () => {
       setBlock(s, 1, 1, end);
     });
     expect(cols(sheet)).toEqual([0, 1, 0, 1, 0, 1]);
-  });
-
-  it('T23: an End with a matching Begin jumps before an End without one, even when lower in the column', () => {
-    // Row 0 End has no Begin (would jump to the start); row 1 End has its Begin at col 2.
-    const sheet = sheetOf((s) => {
-      setBlock(s, 0, 5, note(pitched));
-      setBlock(s, 2, 1, begin);
-      setBlock(s, 3, 0, end);
-      setBlock(s, 3, 1, end);
-    });
-    // First arrival at col 3 jumps to 2 (row 1); then row 0 End jumps to the start.
-    expect(cols(sheet).slice(0, 7)).toEqual([0, 1, 2, 3, 2, 3, 0]);
-  });
-
-  it('T23: of two Ends with Begins, the one with the closer Begin jumps first', () => {
-    const sheet = sheetOf((s) => {
-      setBlock(s, 0, 0, begin);
-      setBlock(s, 2, 1, begin);
-      setBlock(s, 4, 0, end);
-      setBlock(s, 4, 1, end);
-    });
-    expect(cols(sheet).slice(0, 8)).toEqual([0, 1, 2, 3, 4, 2, 3, 4]);
-  });
-
-  it('T29: three nested repeats with their Ends in one column replay the inner ones on every outer jump', () => {
-    // Begins at cols 0, 1, 2 (rows 0, 1, 2), a Blank at col 3, all three Ends at col 4.
-    const sheet = sheetOf((s) => {
-      for (let i = 0; i < 3; i++) setBlock(s, i, i, begin);
-      setBlock(s, 3, 5, { type: 'blank' });
-      for (let i = 0; i < 3; i++) setBlock(s, 4, i, end);
-    });
-    // inner; middle then inner; outer, then inner, middle, inner.
-    expect(cols(sheet)).toEqual([0, 1, 2, 3, 4, 2, 3, 4, 1, 2, 3, 4, 2, 3, 4, 0, 1, 2, 3, 4, 2, 3, 4, 1, 2, 3, 4, 2, 3, 4]);
-  });
-
-  it('T29: three nested repeats with their Ends in separate columns play the same way', () => {
-    const sheet = sheetOf((s) => {
-      for (let i = 0; i < 3; i++) setBlock(s, i, i, begin);
-      setBlock(s, 3, 5, { type: 'blank' });
-      for (let i = 0; i < 3; i++) setBlock(s, 4 + i, 2 - i, end);
-    });
-    const c = cols(sheet);
-    expect(c.filter((x) => x === 3)).toHaveLength(8);
   });
 
   it('deeply nested repeats double per level yet still end', () => {
@@ -290,6 +236,78 @@ describe('buildTimeline: repeats', () => {
     expect(t.ticks.length).toBeLessThanOrEqual(MAX_TICKS);
     expect(t.skipped).toEqual([]);
   });
+});
+
+/**
+ * T30: the repeat mechanism, measured in-game (Sheet Music - Repeat Mechanics, scenarios 1-21). Scenario columns count
+ * from 1 and rows are B (top), A, G; a piano note on another row marks the first and last column of each song.
+ * Expected sequences are what the game played; "first" and "steady" are the first and later playbacks of the
+ * scenarios that loop through an End jumping back to the start.
+ */
+describe('buildTimeline: repeat mechanics measured in-game (T30)', () => {
+  const R = { B: 0, A: 1, G: 2 } as const;
+  type Pos = [number, keyof typeof R];
+  const layout = (begins: Pos[], ends: Pos[], last: number): Sheet =>
+    sheetOf((s) => {
+      setBlock(s, 0, 5, note(pitched));
+      setBlock(s, last - 1, 5, note(pitched));
+      for (const [c, r] of begins) setBlock(s, c - 1, R[r], { type: 'repeatBegin' });
+      for (const [c, r] of ends) setBlock(s, c - 1, R[r], { type: 'repeatEnd' });
+    });
+  const seq = (sheet: Sheet) => cols(sheet).map((c) => c + 1).join('-');
+
+  const natural: [string, Pos[], Pos[], number, string][] = [
+    ['S1 nested pair, same row', [[2, 'A'], [3, 'A']], [[4, 'A'], [5, 'A']], 6, '1-2-3-4-3-4-5-3-4-5-6'],
+    ['S2 plus a lone End above, column 5', [[2, 'A'], [3, 'A']], [[4, 'A'], [5, 'A'], [5, 'B']], 6, '1-2-3-4-3-4-5-1-2-3-4-3-4-5-3-4-5-6'],
+    ['S3 plus a lone End below, column 5', [[2, 'A'], [3, 'A']], [[4, 'A'], [5, 'A'], [5, 'G']], 6, '1-2-3-4-3-4-5-3-4-5-1-2-3-4-3-4-5-3-4-5-6'],
+    ['S4 inner pair above', [[2, 'A'], [3, 'B']], [[4, 'A'], [4, 'B']], 5, '1-2-3-4-3-4-2-3-4-3-4-5'],
+    ['S5 inner pair below', [[2, 'A'], [3, 'G']], [[4, 'A'], [4, 'G']], 5, '1-2-3-4-2-3-4-3-4-5'],
+    ['S6 overlapping pairs on two rows', [[2, 'A'], [3, 'B']], [[4, 'A'], [5, 'B']], 6, '1-2-3-4-2-3-4-5-3-4-5-6'],
+    ['S7 a lone End', [], [[3, 'B']], 5, '1-2-3-1-2-3-4-5'],
+    ['S8 a pair then a lone End', [[2, 'A']], [[3, 'A'], [4, 'B']], 6, '1-2-3-2-3-4-1-2-3-2-3-4-5-6'],
+    ['S9 lone End above a matched End', [[2, 'A']], [[3, 'A'], [3, 'B']], 4, '1-2-3-1-2-3-2-3-4'],
+    ['S10 lone End below a matched End', [[2, 'A']], [[3, 'A'], [3, 'G']], 4, '1-2-3-2-3-1-2-3-2-3-4'],
+    ['S11 an End whose row has no Begin', [[2, 'B']], [[3, 'A']], 4, '1-2-3-1-2-3-4'],
+    ['S12 three Begins, three Ends, one row', [[2, 'A'], [3, 'A'], [4, 'A']], [[5, 'A'], [6, 'A'], [7, 'A']], 9, '1-2-3-4-5-4-5-6-4-5-6-7-4-5-6-7-8-9'],
+    ['S13 nested pair on two rows', [[2, 'A'], [3, 'B']], [[5, 'A'], [4, 'B']], 6, '1-2-3-4-3-4-5-2-3-4-3-4-5-6'],
+    ['S14 a lone End inside a pair', [[2, 'A']], [[4, 'A'], [3, 'B']], 5, '1-2-3-1-2-3-4-2-3-4-5'],
+    ['S15 three Ends in one column', [[2, 'B'], [3, 'A'], [4, 'G']], [[5, 'B'], [5, 'A'], [5, 'G']], 6, '1-2-3-4-5-2-3-4-5-3-4-5-4-5-6'],
+    ['S17', [[2, 'B'], [3, 'A'], [4, 'G']], [[5, 'A'], [7, 'G'], [7, 'B']], 10, '1-2-3-4-5-3-4-5-6-7-2-3-4-5-3-4-5-6-7-4-5-6-7-8-9-10'],
+    ['S19', [[2, 'B'], [3, 'A'], [6, 'A']], [[5, 'A'], [7, 'B'], [8, 'A']], 10, '1-2-3-4-5-3-4-5-6-7-2-3-4-5-3-4-5-6-7-8-6-7-8-9-10'],
+    ['S20', [[3, 'A'], [4, 'G']], [[5, 'A'], [7, 'G'], [8, 'A']], 10, '1-2-3-4-5-3-4-5-6-7-4-5-6-7-8-3-4-5-6-7-4-5-6-7-8-9-10'],
+    ['S21', [[2, 'G'], [4, 'A'], [5, 'G']], [[3, 'A'], [3, 'G'], [4, 'B']], 10, '1-2-3-1-2-3-2-3-4-1-2-3-1-2-3-2-3-4-5-6-7-8-9-10'],
+  ];
+  for (const [name, begins, ends, last, expected] of natural) {
+    it(`${name}: ${expected}`, () => {
+      const t = buildTimeline(profile, layout(begins, ends, last));
+      expect(seq(layout(begins, ends, last))).toBe(expected);
+      expect(t.then).toBeUndefined();
+    });
+  }
+
+  const looping: [string, Pos[], Pos[], number, string, string][] = [
+    [
+      'S16 an End jumping to the start keeps its state: the first playback differs from the later ones',
+      [[2, 'B'], [3, 'A'], [4, 'G'], [6, 'A']],
+      [[5, 'A'], [7, 'G'], [7, 'B'], [8, 'A']],
+      9,
+      '1-2-3-4-5-3-4-5-6-7-2-3-4-5-3-4-5-6-7-4-5',
+      '1-2-3-4-5-6-7-2-3-4-5-3-4-5-6-7-4-5',
+    ],
+    ['S18', [[3, 'A'], [4, 'G'], [6, 'A']], [[5, 'A'], [7, 'G'], [8, 'A']], 10, '1-2-3-4-5-3-4-5-6-7-4-5', '1-2-3-4-5-6-7-4-5'],
+  ];
+  for (const [name, begins, ends, last, first, steady] of looping) {
+    it(name, () => {
+      const t = buildTimeline(profile, layout(begins, ends, last));
+      // Played as the engine does (the timeline once, then its loop for ever) it is the game's first playback
+      // followed by its steady playbacks; the loop itself may start part-way through a playback.
+      const played = [...t.ticks, ...(t.then?.ticks ?? []), ...(t.then?.ticks ?? []), ...(t.then?.ticks ?? [])].map((x) => x.col + 1).join('-');
+      expect(played.startsWith(`${first}-${steady}-${steady}-${steady}`)).toBe(true);
+      expect(t.then?.then).toBe(t.then);
+      expect(t.then?.passSeconds).toBeCloseTo((t.then?.ticks.length ?? 0) * t.colSeconds, 9);
+      expect(t.then?.ticks[0]?.time).toBe(0);
+    });
+  }
 });
 
 describe('buildTimeline: properties', () => {

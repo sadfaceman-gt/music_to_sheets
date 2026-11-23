@@ -102,59 +102,92 @@ export function buildTimeline(profile: GameProfile, sheet: Sheet, options: Timel
     return notes;
   };
 
-  /** Rows of the Repeat Ends in a column, topmost first. */
-  const endsIn = (col: number): number[] =>
-    (byCol.get(col) ?? []).filter(({ cell }) => cell.block?.type === 'repeatEnd').map(({ row }) => row);
-
-  /** Nearest Begin before `col` on `row` inside the window, or null when there is none. */
-  const beginOf = (col: number, row: number): number | null => {
-    for (let c = col - 1; c >= start; c--) {
-      if ((byCol.get(c) ?? []).some((x) => x.row === row && x.cell.block?.type === 'repeatBegin')) return c;
+  // Repeats (Design 2.5, verified in-game 2026-11-23, see the Game Profile): every Repeat End is armed at the start
+  // of a pass. The playhead remembers, per row, the last Begin it flowed through (landing on one after a jump doesn't
+  // count). On reaching a column, the topmost armed End jumps to that Begin; with none, or one lying to its right,
+  // it jumps to the start of the song. A jump to column T arms the other Ends whose own nearest Begin lies after T;
+  // flowing through a Begin arms the Ends on its row that lie to its left. Running off the end resets everything.
+  interface RepeatEnd {
+    col: number;
+    row: number;
+    /** Column of the nearest Begin to the left on its row inside the window, else the window start. */
+    begin: number;
+  }
+  const ends: RepeatEnd[] = [];
+  for (const [col, list] of byCol) {
+    if (col < start || col > end) continue;
+    for (const { row, cell } of list) {
+      if (cell.block?.type !== 'repeatEnd') continue;
+      let begin = start;
+      for (let c = col - 1; c >= start; c--) {
+        if ((byCol.get(c) ?? []).some((x) => x.row === row && x.cell.block?.type === 'repeatBegin')) {
+          begin = c;
+          break;
+        }
+      }
+      ends.push({ col, row, begin });
     }
-    return null;
-  };
+  }
+  const endsAt = new Map<number, RepeatEnd[]>();
+  for (const e of ends) {
+    let list = endsAt.get(e.col);
+    if (!list) endsAt.set(e.col, (list = []));
+    list.push(e);
+  }
+  for (const list of endsAt.values()) list.sort((a, b) => a.row - b.row);
+  const beginsAt = (col: number): number[] =>
+    (byCol.get(col) ?? []).filter(({ cell }) => cell.block?.type === 'repeatBegin').map(({ row }) => row);
 
-  const spent = new Set<string>(); // Repeat Ends that already jumped this pass
+  const spent = new Set<RepeatEnd>();
+  const lastBegin = new Map<number, number>();
+  const seen = new Map<string, number>(); // state after a jump -> index of the next tick
   const ticks: Tick[] = [];
+  let loopFrom = -1;
   let col = start;
+  let landed = false;
   while (col <= end) {
     if (ticks.length >= MAX_TICKS) {
       skipped.push({ col, row: 0, reason: `playback stopped after ${MAX_TICKS} ticks (runaway repeats)` });
       break;
     }
-    ticks.push({ index: ticks.length, col, time: ticks.length * colSeconds, notes: notesOf(col) });
-
-    // With several armed Ends in one column the game prefers an End that has a matching Begin over one without,
-    // then the End whose Begin is closer; remaining ties go to the topmost row.
-    let row: number | undefined;
-    let target = start;
-    let best = -2;
-    for (const r of endsIn(col)) {
-      if (spent.has(`${col},${r}`)) continue;
-      const b = beginOf(col, r);
-      const rank = b ?? -1;
-      if (rank > best) {
-        best = rank;
-        row = r;
-        target = b ?? start;
+    if (!landed) {
+      for (const row of beginsAt(col)) {
+        lastBegin.set(row, col);
+        for (const e of ends) if (e.row === row && e.col < col) spent.delete(e);
       }
     }
-    if (row === undefined) {
+    landed = false;
+    ticks.push({ index: ticks.length, col, time: ticks.length * colSeconds, notes: notesOf(col) });
+
+    const jumper = (endsAt.get(col) ?? []).find((e) => !spent.has(e));
+    if (jumper === undefined) {
       col++;
       continue;
     }
-    spent.add(`${col},${row}`);
-    if (profile.repeats.rearmInner) {
-      for (let c = target + 1; c < col; c++) for (const r of endsIn(c)) spent.delete(`${c},${r}`);
-      // Ends stacked in this same column are nested inside the jump when their Begin lies after its target (T29);
-      // an End with no Begin, or an outer one with an earlier Begin, stays as it is.
-      for (const r of endsIn(col)) {
-        const b = beginOf(col, r);
-        if (r !== row && b !== null && b > target) spent.delete(`${col},${r}`);
-      }
-    }
+    spent.add(jumper);
+    let target = lastBegin.get(jumper.row);
+    if (target === undefined || target > jumper.col) target = start;
+    for (const e of ends) if (e !== jumper && e.begin > target) spent.delete(e);
     col = target;
+    landed = true;
+
+    // The same state again means the song would repeat this stretch for ever: keep it once and loop it.
+    const key = `${col}|${ends.map((e) => (spent.has(e) ? 1 : 0)).join('')}|${[...lastBegin].sort((a, b) => a[0] - b[0]).join(';')}`;
+    const earlier = seen.get(key);
+    if (earlier !== undefined) {
+      loopFrom = earlier;
+      break;
+    }
+    seen.set(key, ticks.length);
   }
 
-  return { window, colSeconds, ticks, passSeconds: (ticks.length * 60) / perMinute, skipped };
+  const passSecondsOf = (n: number) => (n * 60) / perMinute;
+  const timeline: Timeline = { window, colSeconds, ticks, passSeconds: passSecondsOf(ticks.length), skipped };
+  if (loopFrom >= 0) {
+    const cycle = ticks.slice(loopFrom).map((t, i) => ({ ...t, index: i, time: i * colSeconds }));
+    const steady: Timeline = { window, colSeconds, ticks: cycle, passSeconds: passSecondsOf(cycle.length), skipped };
+    steady.then = steady;
+    timeline.then = steady;
+  }
+  return timeline;
 }

@@ -190,6 +190,8 @@ export function Editor({ profile, session, rowColors = DEFAULT_ROW_COLOR_PROFILE
     },
     [store],
   );
+  // What the running playback was built from: only a real change is sent on, so a loop with carried-over repeat state isn't restarted.
+  const playedWith = useRef<{ sheet: unknown; selection: unknown; make: unknown } | null>(null);
   // Transport (M1b). The timeline is rebuilt from the sheet whenever it is needed; the engine swaps it in at the
   // next pass start, so editing or changing the BPM while playing never glitches the current pass.
   const makeTimeline = useCallback(() => {
@@ -209,6 +211,8 @@ export function Editor({ profile, session, rowColors = DEFAULT_ROW_COLOR_PROFILE
       setCue(col);
       store.setState({ lastReport: timeline.skipped.length > 0 ? [`${timeline.skipped.length} notes can't be played (${timeline.skipped[0]?.reason})`] : [] });
       session.play(timeline, col);
+      const now = store.getState();
+      playedWith.current = { sheet: now.sheet, selection: now.selection, make: makeTimeline };
     },
     [session, store, makeTimeline],
   );
@@ -246,6 +250,8 @@ export function Editor({ profile, session, rowColors = DEFAULT_ROW_COLOR_PROFILE
   );
   useEffect(() => {
     if (transport === 'stopped') return;
+    const p = playedWith.current;
+    if (p && p.sheet === sheet && p.selection === selection && p.make === makeTimeline) return;
     const timeline = makeTimeline();
     if (timeline.ticks.length > 0) session.setTimeline(timeline);
   }, [sheet, selection, transport, makeTimeline, session]);

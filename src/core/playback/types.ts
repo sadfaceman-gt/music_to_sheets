@@ -37,6 +37,12 @@ export interface Timeline {
   passSeconds: number;
   /** Notes that couldn't be turned into sounds (bad file, unknown instrument), reported not dropped silently. */
   skipped: { col: number; row: number; reason: string }[];
+  /**
+   * The timeline for every pass after this one. Absent when each pass starts fresh (the playhead ran off the end).
+   * Set when repeats make the song loop with state carried over (an End jumping back to the start, forever): this
+   * timeline is the opening stretch plus one cycle, and `then` is that cycle alone, whose own `then` is itself.
+   */
+  then?: Timeline;
 }
 
 export interface TimelineOptions {

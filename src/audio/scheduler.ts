@@ -145,10 +145,8 @@ export class PassCursor {
         this.passStart = passEnd;
         this.pass++;
         this.announced = false;
-        if (this.pending) {
-          this.timeline = this.pending;
-          this.pending = null;
-        }
+        this.timeline = this.pending ?? this.timeline.then ?? this.timeline;
+        this.pending = null;
       }
     }
     return { notes, newPasses };

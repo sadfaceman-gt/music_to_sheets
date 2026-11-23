@@ -48,6 +48,32 @@ function simulate(cursor: PassCursor, seconds: number, audible?: (i: string) => 
   return { notes, passStarts };
 }
 
+describe('PassCursor with a looping timeline (T30)', () => {
+  it('plays the opening stretch once, then its `then` timeline for ever', () => {
+    const steady = { ...timeline(2, 100), ticks: [timeline(2, 100).ticks[0]!, timeline(2, 100).ticks[1]!] } as Timeline;
+    steady.then = steady;
+    const first = { ...timeline(4, 100), then: steady } as Timeline;
+    const { notes, passStarts } = simulate(new PassCursor(first, true, 0), 5);
+    const colSeconds = 60 / 400;
+    expect(passStarts[0]).toBe(0);
+    expect(passStarts[1]).toBeCloseTo(4 * colSeconds, 9);
+    expect(passStarts[2]).toBeCloseTo(6 * colSeconds, 9);
+    expect(notes.filter((n) => n.pass === 0)).toHaveLength(4);
+    expect(notes.filter((n) => n.pass === 1)).toHaveLength(2);
+    expect(notes.filter((n) => n.pass === 2)).toHaveLength(2);
+  });
+
+  it('a pending timeline still wins over `then`', () => {
+    const steady = timeline(2, 100);
+    steady.then = steady;
+    const first = { ...timeline(4, 100), then: steady } as Timeline;
+    const cursor = new PassCursor(first, true, 0);
+    cursor.setPending(timeline(3, 100));
+    const { notes } = simulate(cursor, 3);
+    expect(notes.filter((n) => n.pass === 1)).toHaveLength(3);
+  });
+});
+
 describe('PassCursor starting part-way into the first pass (T26)', () => {
   const tl = timeline(100, 100);
   const offset = tl.ticks[50]!.time;
