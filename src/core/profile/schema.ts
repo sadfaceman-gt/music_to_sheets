@@ -103,6 +103,20 @@ export const gameProfileSchema = z.strictObject({
     /** Accidental characters in Gear/Rack note text, e.g. Pc- PE# (Design 2.6). */
     textAccidentals: z.strictObject({ natural: z.string().length(1), sharp: z.string().length(1), flat: z.string().length(1) }),
   }),
+  /**
+   * GMSF file layout (Design 13.3), checked against the three benchmark files on 2026-11-23. Instrument note IDs
+   * live on each instrument (`gmsf`); these are the header, the trailer, the other block IDs and the Rack record.
+   * A Rack cell (`ids.rack`) is followed inline by `rackSlots` pairs (note block ID, row; empty = both `ids.empty`)
+   * and one volume byte. Rows count from the top (high B = 0), as in the sheet.
+   */
+  gmsf: z.strictObject({
+    magic: z.string().length(4),
+    version: z.tuple([blockId, blockId]),
+    trailer: z.string().min(1),
+    ids: z.strictObject({ empty: blockId, blank: blockId, repeatBegin: blockId, repeatEnd: blockId, rack: blockId }),
+    rackSlots: z.int().positive(),
+    verified: z.iso.date(),
+  }),
   /** Natural note letter (lowercase = lower octave) to sample file index. */
   naturalFiles: z.strictObject(
     Object.fromEntries(NATURAL_LETTERS.map((l) => [l, fileIndex])) as Record<NaturalLetter, typeof fileIndex>,
