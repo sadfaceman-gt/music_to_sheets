@@ -125,10 +125,16 @@ export function paint(profile: GameProfile, sheet: Sheet, pos: CellPos, entry: P
   return { changed: 1, messages: isBedrock(profile, pos.col, pos.row) ? [bedrockNotice(profile, block) ?? BEDROCK_NOTICE] : [] };
 }
 
-export function erase(_profile: GameProfile, sheet: Sheet, rect: CellRect): EditReport {
+/** Clears the cells of `rect`; with `blocksOnly` an Audio Gear or Rack in the cell stays (T25). */
+export function erase(_profile: GameProfile, sheet: Sheet, rect: CellRect, blocksOnly = false): EditReport {
   let changed = 0;
   for (const { col, row } of cellsInRect(sheet, rect)) {
-    setCell(sheet, col, row, undefined);
+    if (blocksOnly) {
+      if (!getCell(sheet, col, row)?.block) continue;
+      setBlock(sheet, col, row, undefined);
+    } else {
+      setCell(sheet, col, row, undefined);
+    }
     changed++;
   }
   return { changed, messages: [] };

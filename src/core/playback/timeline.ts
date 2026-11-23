@@ -106,12 +106,12 @@ export function buildTimeline(profile: GameProfile, sheet: Sheet, options: Timel
   const endsIn = (col: number): number[] =>
     (byCol.get(col) ?? []).filter(({ cell }) => cell.block?.type === 'repeatEnd').map(({ row }) => row);
 
-  /** Nearest Begin before `col` on `row` inside the window, else the window start. */
-  const targetOf = (col: number, row: number): number => {
+  /** Nearest Begin before `col` on `row` inside the window, or null when there is none. */
+  const beginOf = (col: number, row: number): number | null => {
     for (let c = col - 1; c >= start; c--) {
       if ((byCol.get(c) ?? []).some((x) => x.row === row && x.cell.block?.type === 'repeatBegin')) return c;
     }
-    return start;
+    return null;
   };
 
   const spent = new Set<string>(); // Repeat Ends that already jumped this pass
@@ -124,13 +124,26 @@ export function buildTimeline(profile: GameProfile, sheet: Sheet, options: Timel
     }
     ticks.push({ index: ticks.length, col, time: ticks.length * colSeconds, notes: notesOf(col) });
 
-    const row = endsIn(col).find((r) => !spent.has(`${col},${r}`));
+    // With several armed Ends in one column the game prefers an End that has a matching Begin over one without,
+    // then the End whose Begin is closer; remaining ties go to the topmost row.
+    let row: number | undefined;
+    let target = start;
+    let best = -2;
+    for (const r of endsIn(col)) {
+      if (spent.has(`${col},${r}`)) continue;
+      const b = beginOf(col, r);
+      const rank = b ?? -1;
+      if (rank > best) {
+        best = rank;
+        row = r;
+        target = b ?? start;
+      }
+    }
     if (row === undefined) {
       col++;
       continue;
     }
     spent.add(`${col},${row}`);
-    const target = targetOf(col, row);
     if (profile.repeats.rearmInner) {
       for (let c = target + 1; c < col; c++) for (const r of endsIn(c)) spent.delete(`${c},${r}`);
     }

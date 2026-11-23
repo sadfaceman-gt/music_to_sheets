@@ -71,6 +71,9 @@ test('block images: review grid, fix a gap, confirm, then the strip draws the ga
   await click(page, 8, 5);
   await expect.poll(async () => (await iconSet(page)).drawn).toBeGreaterThan(drawn);
 
+  // T21: the palette shows the game image for a kind that has one, and the original swatch once back on original icons.
+  await expect(page.getByTestId('palette-blank').locator('canvas')).toHaveCount(1);
+
   // The choice and the mapping survive a reload.
   await page.reload();
   await page.getByTestId('strip-canvas').waitFor();
@@ -81,6 +84,7 @@ test('block images: review grid, fix a gap, confirm, then the strip draws the ga
   await page.getByTestId('iconset-original').check();
   await page.getByTestId('settings-close').click();
   await expect.poll(() => iconSet(page)).toMatchObject({ mode: 'original' });
+  await expect(page.getByTestId('palette-blank').locator('canvas')).toHaveCount(0);
 });
 
 test('block images: a kind without an image falls back to its original icon', async ({ page }) => {

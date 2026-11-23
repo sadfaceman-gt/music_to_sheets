@@ -63,14 +63,17 @@ export class PlaybackEngine {
     return this.cursor !== null && this.paused;
   }
 
-  /** Starts from the beginning. With loop, passes follow each other on the audio clock until stop(). */
-  play(timeline: Timeline, options: { loop: boolean }): void {
+  /**
+   * Starts from the beginning, or `offset` seconds into the first pass. With loop, passes follow each other on the
+   * audio clock until stop().
+   */
+  play(timeline: Timeline, options: { loop: boolean; offset?: number }): void {
     this.stop();
     this.passStarts.length = 0;
     this.passes = [];
     this.paused = false;
     void this.ctx.resume();
-    this.cursor = new PassCursor(timeline, options.loop, this.ctx.currentTime + this.startDelay);
+    this.cursor = new PassCursor(timeline, options.loop, this.ctx.currentTime + this.startDelay, options.offset ?? 0);
     this.startTimers();
     this.pump();
   }

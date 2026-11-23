@@ -48,6 +48,24 @@ function simulate(cursor: PassCursor, seconds: number, audible?: (i: string) => 
   return { notes, passStarts };
 }
 
+describe('PassCursor starting part-way into the first pass (T26)', () => {
+  const tl = timeline(100, 100);
+  const offset = tl.ticks[50]!.time;
+  const { notes, passStarts } = simulate(new PassCursor(tl, true, 1, offset), 20);
+
+  it('skips the earlier ticks and plays the chosen one at the start time', () => {
+    expect(notes[0]?.tickIndex).toBe(50);
+    expect(notes[0]?.when).toBeCloseTo(1, 6);
+    expect(notes.filter((n) => n.pass === 0)).toHaveLength(50);
+  });
+
+  it('the next pass follows when the first pass would have ended', () => {
+    expect(passStarts[0]).toBeCloseTo(1 - offset, 9);
+    expect(passStarts[1]).toBeCloseTo(1 - offset + 15, 9);
+    expect(notes.find((n) => n.pass === 1)?.tickIndex).toBe(0);
+  });
+});
+
 describe('PassCursor over 30 s of a looping 100-column 100-BPM timeline', () => {
   const tl = timeline(100, 100);
   const { notes, passStarts } = simulate(new PassCursor(tl, true, 0), 30);

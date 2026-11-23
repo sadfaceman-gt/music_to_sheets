@@ -28,7 +28,7 @@ export interface EditorState {
 export interface EditorActions {
   init(profile: GameProfile, cols?: number): void;
   paint(pos: CellPos): void;
-  erase(rect: CellRect): void;
+  erase(rect: CellRect, blocksOnly?: boolean): void;
   setSelection(rect: CellRect | null): void;
   copy(): void;
   cut(): void;
@@ -151,8 +151,8 @@ export function createEditorStore(profile: GameProfile, cols?: number): EditorSt
         run('Paint', (sheet) => edit.paint(p, sheet, pos, entry));
       },
 
-      erase(rect) {
-        run('Erase', (sheet, p) => edit.erase(p, sheet, rect));
+      erase(rect, blocksOnly = false) {
+        run('Erase', (sheet, p) => edit.erase(p, sheet, rect, blocksOnly));
       },
 
       setSelection(rect) {

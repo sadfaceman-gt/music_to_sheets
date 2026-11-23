@@ -56,4 +56,6 @@ export const THEME = {
   minimapWindowStroke: '#50a0ff',
   playheadFill: 'rgba(255, 210, 74, 0.16)',
   playhead: '#ffd24a',
+  band: 'rgba(255, 210, 74, 0.10)',
+  bandDisabled: 'rgba(120, 125, 135, 0.12)',
 } as const;

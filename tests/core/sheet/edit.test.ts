@@ -166,6 +166,16 @@ describe('erase', () => {
     expect(Object.keys(s.cells)).toEqual(['5,5']);
     expect(erase(profile, s, rect(0, 0, 2, 2)).changed).toBe(0);
   });
+
+  it('T25: with blocksOnly the Gear stays and cells without a block are not counted', () => {
+    const s = fresh();
+    const gear = gearOf([gn('piano', 'c')]);
+    put(s, 0, 0, { ...noteCell('piano'), gear });
+    put(s, 1, 0, { gear });
+    expect(erase(profile, s, rect(0, 0, 1, 0), true).changed).toBe(1);
+    expect(getCell(s, 0, 0)).toEqual({ gear });
+    expect(getCell(s, 1, 0)).toEqual({ gear });
+  });
 });
 
 describe('copy / paste', () => {

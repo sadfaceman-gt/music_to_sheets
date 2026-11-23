@@ -3,6 +3,7 @@ import { useStore } from 'zustand';
 import { blockKinds } from '../core/blockImages/match.ts';
 import type { BlockKind } from '../core/blockImages/match.ts';
 import { instrumentColors } from '../editor/view/colors.ts';
+import { DropArea } from './DropArea.tsx';
 import { hasDirectoryPicker, pickFolder } from '../audio/folderPick.ts';
 import { objectUrl } from '../audio/blockImageStore.ts';
 import { topLevelFiles } from '../audio/names.ts';
@@ -159,9 +160,9 @@ export function BlockImagesSection({ session }: { session: AudioSession }) {
   const confirmed = mapping ? Object.keys(mapping).length : 0;
 
   return (
-    <div data-testid="block-images-section" className="space-y-2">
+    <DropArea testId="block-images-section" disabled={busy !== null || !opfs} onFiles={(files) => void importFiles(files)}>
       <p className="text-sm text-slate-300">
-        Optional: pick the folder with your game's block images (PNG) so the editor looks like the game. They stay on this device and are not used until you confirm the match.
+        Optional: pick the folder with your game's block images (PNG) so the editor looks like the game. They stay on this device and are not used until you confirm the match. You can also drop the folder (or its files) here.
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <button
@@ -238,6 +239,6 @@ export function BlockImagesSection({ session }: { session: AudioSession }) {
         </label>
         {!mapping && <span className="ml-2 text-slate-500">(confirm a mapping first)</span>}
       </fieldset>
-    </div>
+    </DropArea>
   );
 }

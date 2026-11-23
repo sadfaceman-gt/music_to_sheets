@@ -5,6 +5,7 @@ import { cellLabel } from '../core/sheet/edit.ts';
 import { rowLetters } from '../core/sheet/rows.ts';
 import { acceptsAccidental } from '../core/sheet/spelling.ts';
 import { humaniseKey } from '../core/sheet/palette.ts';
+import { IconCanvas } from './IconCanvas.tsx';
 import type { Accidental, CellPos, GearBlock, GearNote } from '../core/sheet/types.ts';
 
 const ACCIDENTALS: Accidental[] = ['natural', 'sharp', 'flat'];
@@ -18,6 +19,8 @@ export interface GearEditorProps {
   onDraft: (gear: GearBlock) => void;
   /** The note picked on the left panel, placed by clicking the grid (T18); null when no note is picked. */
   brush: { instrument: string; accidental: Accidental } | null;
+  /** The player's block images by block kind id; a placed note shows its image over the whole grid cell (T21). */
+  icons?: ReadonlyMap<string, ImageBitmap> | null;
   onRemove: () => void;
   /** Save and close. */
   onClose: () => void;
@@ -27,7 +30,7 @@ export interface GearEditorProps {
  * Editor for one cell's Gear/Rack: kind, a 14 x maxNotes grid (one note per column), note slots, volume, the exact
  * text to type, and a parser for pasted text. Edits go to the parent as a draft; closing saves it (T8).
  */
-export function GearEditor({ profile, pos, initial, onDraft, brush, onRemove, onClose }: GearEditorProps) {
+export function GearEditor({ profile, pos, initial, onDraft, brush, icons, onRemove, onClose }: GearEditorProps) {
   const { gear } = profile;
   const writable = useMemo(
     () => Object.entries(profile.instruments).filter(([, inst]) => inst.code !== null).map(([key]) => key),
@@ -191,12 +194,13 @@ export function GearEditor({ profile, pos, initial, onDraft, brush, onRemove, on
 
       <div className="flex flex-col gap-1" data-testid="gear-grid-wrap">
         <div className="text-slate-400">Pick a note in the left panel, then click the grid to place it (one per column):</div>
-        <div role="grid" aria-label="Gear notes" className="grid gap-px" style={{ gridTemplateColumns: `1.25rem repeat(${gear.maxNotes}, 1fr)` }}>
+        <div role="grid" aria-label="Gear notes" className="grid gap-px" style={{ gridTemplateColumns: `1.25rem repeat(${gear.maxNotes}, 1.75rem)` }}>
           {letters.map((letter, row) => (
             <div key={row} role="row" className="contents">
               <span className="self-center text-center text-xs text-slate-400">{letter}</span>
               {slots.map((n, col) => {
                 const here = n !== null && n.letter === letter;
+                const image = here ? icons?.get(`${n.instrument}:${n.accidental}`) : undefined;
                 return (
                   <button
                     key={col}
@@ -206,9 +210,9 @@ export function GearEditor({ profile, pos, initial, onDraft, brush, onRemove, on
                     aria-label={`Column ${col + 1}, row ${letter}${here ? ', has a note' : ''}`}
                     aria-pressed={here}
                     onClick={() => placeOnGrid(col, row)}
-                    className={`h-5 rounded-sm text-[10px] font-bold ${here ? 'bg-sky-500 text-slate-950' : 'bg-slate-800 hover:bg-slate-700'}`}
+                    className={`h-7 w-7 overflow-hidden rounded-sm text-[10px] font-bold ${here ? (image ? 'bg-transparent' : 'bg-sky-500 text-slate-950') : 'bg-slate-800 hover:bg-slate-700'}`}
                   >
-                    {here ? (profile.instruments[n.instrument]?.code ?? '') : ''}
+                    {here ? (image ? <IconCanvas image={image} size={28} /> : (profile.instruments[n.instrument]?.code ?? '')) : ''}
                   </button>
                 );
               })}

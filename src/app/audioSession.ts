@@ -363,11 +363,15 @@ export class AudioSession {
     return engine;
   }
 
-  /** Starts from the beginning, looping (the whole song as in-game, or the selection). */
-  play(timeline: Timeline): void {
+  /**
+   * Starts from the beginning, or from the first time column `fromCol` is played, looping (the whole song as in-game,
+   * or the selection). A column that isn't played starts from the beginning.
+   */
+  play(timeline: Timeline, fromCol?: number): void {
     const engine = this.ensureEngine();
-    engine.play(timeline, { loop: true });
-    this.set({ transport: 'playing', playhead: timeline.ticks[0]?.col ?? null });
+    const tick = fromCol === undefined ? undefined : timeline.ticks.find((t) => t.col === fromCol);
+    engine.play(timeline, { loop: true, offset: tick?.time ?? 0 });
+    this.set({ transport: 'playing', playhead: (tick ?? timeline.ticks[0])?.col ?? null });
   }
 
   /** Pause when playing, resume when paused. Returns false when stopped (the caller should play). */

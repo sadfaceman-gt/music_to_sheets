@@ -5,7 +5,7 @@ import { barsInRange, sigLabel, signaturesOf } from '../../core/sheet/timeSig.ts
 import { cellKey, parseCellKey } from '../../core/sheet/types.ts';
 import type { Cell, CellPos, CellRect, Sheet } from '../../core/sheet/types.ts';
 import { instrumentColors, THEME } from './colors.ts';
-import { cellOrigin, GUTTER_W, HEADER_H, SIG_ROW_H, minimapCols, minimapX, viewCols, visibleCols } from './viewport.ts';
+import { BAND_H, bandTop, cellOrigin, GUTTER_W, HEADER_H, SIG_ROW_H, minimapCols, minimapX, viewCols, visibleCols } from './viewport.ts';
 import type { Viewport } from './viewport.ts';
 
 export interface DrawParams {
@@ -28,6 +28,10 @@ export interface DrawParams {
   icons?: ReadonlyMap<string, ImageBitmap>;
   /** Column under the playhead while playing. */
   playhead?: number | null;
+  /** Column where playback will start (the tracking bar while stopped). */
+  cue?: number | null;
+  /** False while playing: the band under the grid can't be used then. */
+  bandEnabled?: boolean;
 }
 
 const FONT = 'system-ui, sans-serif';
@@ -209,16 +213,24 @@ export function draw(ctx: CanvasRenderingContext2D, p: DrawParams): void {
     ctx.lineWidth = 2;
     ctx.strokeRect(a.x + 1, a.y + 1, w - 2, h - 2);
   }
-  if (p.playhead != null) {
-    const { x } = cellOrigin(vp, p.playhead, 0);
+  // The band under the grid, the tracking bar (playhead, or the start column while stopped) and its handle (T26).
+  const bandY = bandTop(sheet.rows, cs, height);
+  ctx.fillStyle = p.bandEnabled === false ? THEME.bandDisabled : THEME.band;
+  ctx.fillRect(GUTTER_W, bandY, width - GUTTER_W, BAND_H);
+  const marker = p.playhead ?? p.cue ?? null;
+  if (marker != null) {
+    const { x } = cellOrigin(vp, marker, 0);
     ctx.fillStyle = THEME.playheadFill;
-    ctx.fillRect(x, HEADER_H, cs, gridBottom - HEADER_H);
+    ctx.fillRect(x, HEADER_H, cs, bandY - HEADER_H);
     ctx.strokeStyle = THEME.playhead;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(x + cs / 2, HEADER_H);
-    ctx.lineTo(x + cs / 2, gridBottom);
+    ctx.lineTo(x + cs / 2, bandY + BAND_H);
     ctx.stroke();
+    ctx.fillStyle = THEME.playhead;
+    roundedRect(ctx, x + cs / 2 - 5, bandY + 1, 10, BAND_H - 2, 3);
+    ctx.fill();
   }
   ctx.restore();
 
@@ -363,17 +375,15 @@ function drawCell(
   const by = y + pad;
   const block = cell.block;
   const showText = cs >= 14;
-  const key = iconKey(cell);
-  const image = key === null ? undefined : icons?.get(key);
+  const image = block ? icons?.get(iconKey(cell) ?? '') : undefined;
+  const gearImage = cell.gear ? icons?.get('gear') : undefined;
+  // Game images fill the whole cell, inside the grid lines (T22).
+  const inset = cs >= 14 ? 1 : 0.5;
+  const full = cs - inset * 2;
 
-  if (image && !block) {
-    // A Gear on an empty tile: the game's Gear image, with the badge below on top of it.
-    ctx.drawImage(image, bx, by, s, s);
-    drawStats.images++;
-  }
   if (block) {
     if (image) {
-      ctx.drawImage(image, bx, by, s, s);
+      ctx.drawImage(image, x + inset, y + inset, full, full);
       drawStats.images++;
     } else if (block.type === 'note') {
       const fill = colors.get(block.instrument) ?? THEME.blank;
@@ -417,7 +427,12 @@ function drawCell(
     const dashed = gear.kind === 'rack';
     ctx.save();
     ctx.setLineDash(dashed ? [Math.max(2, cs * 0.12), Math.max(2, cs * 0.1)] : []);
-    if (!block) {
+    if (gearImage) {
+      // The Gear/Rack image sits in the bottom left so the note behind it stays visible (T24).
+      const g = Math.round(cs * 0.5);
+      ctx.drawImage(gearImage, x + inset, y + cs - inset - g, g, g);
+      drawStats.images++;
+    } else if (!block) {
       ctx.strokeStyle = THEME.badgeText;
       ctx.lineWidth = 1;
       roundedRect(ctx, bx + 0.5, by + 0.5, s - 1, s - 1, s * 0.22);

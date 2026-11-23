@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import type { GameProfile } from '../core/profile/schema.ts';
 import { humaniseKey, paletteEntries } from '../core/sheet/palette.ts';
 import type { PaletteEntry } from '../core/sheet/palette.ts';
+import { IconCanvas } from './IconCanvas.tsx';
 import { instrumentColors, THEME } from './view/colors.ts';
 
 const ACCIDENTAL_GLYPH = { natural: '', sharp: '♯', flat: '♭' } as const;
@@ -53,9 +54,11 @@ export interface PaletteProps {
   solo?: readonly string[];
   onToggleMute?: (instrument: string) => void;
   onToggleSolo?: (instrument: string) => void;
+  /** The player's block images by block kind id; a palette block with one shows it instead of the original swatch (T21). */
+  icons?: ReadonlyMap<string, ImageBitmap> | null;
 }
 
-export function Palette({ profile, selectedId, onSelect, bindings, listeningId, onListen, muted = [], solo = [], onToggleMute, onToggleSolo }: PaletteProps) {
+export function Palette({ profile, selectedId, onSelect, bindings, listeningId, onListen, muted = [], solo = [], onToggleMute, onToggleSolo, icons }: PaletteProps) {
   const groups = useMemo(() => groupEntries(profile), [profile]);
   const colors = useMemo(() => instrumentColors(profile), [profile]);
 
@@ -97,6 +100,7 @@ export function Palette({ profile, selectedId, onSelect, bindings, listeningId, 
               const active = entry.id === selectedId;
               const key = Object.keys(bindings).find((k) => bindings[k] === entry.id);
               const hollow = block?.type === 'blank';
+              const image = icons?.get(entry.paint.kind === 'gear' ? 'gear' : entry.id);
               return (
                 <button
                   key={entry.id}
@@ -113,15 +117,15 @@ export function Palette({ profile, selectedId, onSelect, bindings, listeningId, 
                   className={`relative flex h-8 w-8 items-center justify-center rounded text-xs font-bold ring-offset-1 ring-offset-slate-900 ${
                     listeningId === entry.id ? 'ring-2 ring-amber-400' : active ? 'ring-2 ring-sky-400' : 'ring-1 ring-slate-700 hover:ring-slate-500'
                   }`}
-                  style={{
+                  style={image ? { background: 'transparent' } : {
                     background: color ?? (hollow ? 'transparent' : THEME.repeat),
                     color: color ? THEME.noteText : hollow ? THEME.blank : THEME.noteText,
                     border: hollow ? `1px solid ${THEME.blank}` : undefined,
                   }}
                 >
-                  {swatchText(profile, entry)}
+                  {image ? <IconCanvas image={image} size={32} className="rounded" /> : swatchText(profile, entry)}
                   {key && (
-                    <span data-testid={`shortcut-${entry.id}`} className="pointer-events-none absolute bottom-0 left-0.5 text-[9px] leading-none text-slate-950">
+                    <span data-testid={`shortcut-${entry.id}`} className={`pointer-events-none absolute bottom-0 left-0.5 text-[9px] leading-none ${image ? 'rounded bg-slate-950/70 px-0.5 text-white' : 'text-slate-950'}`}>
                       {key.toUpperCase()}
                     </span>
                   )}

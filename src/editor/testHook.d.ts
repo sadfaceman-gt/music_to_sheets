@@ -7,6 +7,8 @@ export interface MtsTestHook {
   getSelection(): CellRect | null;
   /** Column under the playhead, null when stopped. */
   getPlayhead(): number | null;
+  /** Column where playback will start (the tracking bar while stopped), null when none was set. */
+  getCue(): number | null;
   /** Transport state and the AudioContext clock; passStarts are the start times of the passes scheduled so far. */
   getEngineState(): { transport: string; contextState: string | null; contextTime: number | null; passStarts: number[]; auditions: number };
   getSounds(): { expected: number; stored: number; decoded: number; placeholders: boolean; missing: Record<string, number[]> };

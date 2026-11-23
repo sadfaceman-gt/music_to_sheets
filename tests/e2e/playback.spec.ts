@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { auditions, click, drag, engineState, openEditor, pickTool, playhead, samplePlayhead, sheetState } from './helpers.ts';
+import { auditions, bandPoint, click, cue, drag, engineState, openEditor, pickTool, playhead, samplePlayhead, sheetState } from './helpers.ts';
 import type { MtsHooks } from './helpers.ts';
 
 test.beforeEach(async ({ page }) => {
@@ -195,8 +195,8 @@ test('painting a note plays it once; erasing and Gear painting do not', async ({
   expect((await auditions(page))[0]![0]).toMatchObject({ instrument: 'piano', col: 2, row: 3 });
   await click(page, 2, 3); // same block again erases
   expect(await auditions(page)).toHaveLength(1);
-  await drag(page, [4, 6], [10, 6]); // a drag previews only its first cell
-  expect(await auditions(page)).toHaveLength(2);
+  await drag(page, [4, 6], [10, 6]); // a drag previews every new note it places (T28)
+  expect(await auditions(page)).toHaveLength(8);
 });
 
 test('mute and solo toggle per instrument and reach the engine', async ({ page }) => {
@@ -252,4 +252,44 @@ test('the playhead is drawn on the strip and the minimap while playing', async (
   // frame is too strict on CI, where the grid repaint can differ slightly).
   await expect.poll(() => playhead(page)).toBeNull();
   await expect.poll(async () => (await snapshot('strip-canvas')) !== stripPlaying, { timeout: 10_000 }).toBe(true);
+});
+
+test('T26: the band under the grid sets where Play starts; Play from Beginning resets it', async ({ page }) => {
+  await drag(page, [2, 5], [19, 5]);
+  const at = async (col: number) => {
+    const b = await bandPoint(page, col);
+    await page.mouse.click(b.x, b.y);
+  };
+
+  await at(10);
+  expect(await cue(page)).toBe(10);
+  await play(page).click();
+  await expect.poll(() => playhead(page), { timeout: 5000 }).toBeGreaterThanOrEqual(10);
+  expect((await samplePlayhead(page, 300))[0]).toBeGreaterThanOrEqual(10);
+
+  // The band is disabled while playing.
+  await at(4);
+  expect(await cue(page)).toBe(10);
+
+  // Paused: the bar can move, and Play then starts there.
+  await play(page).click();
+  await expect(play(page)).toHaveText(/Resume/);
+  await at(5);
+  expect(await cue(page)).toBe(5);
+  await play(page).click();
+  await expect.poll(() => playhead(page), { timeout: 5000 }).toBeGreaterThanOrEqual(5);
+  expect((await samplePlayhead(page, 200))[0]).toBeLessThan(10);
+  await stop(page).click();
+  await expect.poll(() => playhead(page)).toBeNull();
+
+  // Outside the song: reset to the start of the window.
+  await at(60);
+  expect(await cue(page)).toBe(2);
+
+  // Play from Beginning resets the bar and plays from the first column.
+  await at(12);
+  await page.getByTestId('transport-play-start').click();
+  await expect.poll(() => playhead(page), { timeout: 5000 }).not.toBeNull();
+  expect(await cue(page)).toBe(2);
+  expect((await samplePlayhead(page, 200))[0]).toBeLessThan(6);
 });

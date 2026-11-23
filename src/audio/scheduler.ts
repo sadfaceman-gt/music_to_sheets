@@ -104,11 +104,13 @@ export class PassCursor {
 
   private readonly loop: boolean;
 
-  constructor(timeline: Timeline, loop: boolean, start: number) {
+  /** `offset` starts the first pass that many seconds in (play from a column): its earlier notes are skipped. */
+  constructor(timeline: Timeline, loop: boolean, start: number, offset = 0) {
     this.loop = loop;
     this.timeline = timeline;
-    this.passStart = start;
-    this.from = start;
+    this.passStart = start - offset;
+    // A hair early, so rounding in start - offset + tick.time can't drop the first note.
+    this.from = start - 1e-6;
   }
 
   setPending(timeline: Timeline): void {

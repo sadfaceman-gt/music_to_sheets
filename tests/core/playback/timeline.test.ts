@@ -235,6 +235,28 @@ describe('buildTimeline: repeats', () => {
     expect(cols(sheet)).toEqual([0, 1, 0, 1, 0, 1]);
   });
 
+  it('T23: an End with a matching Begin jumps before an End without one, even when lower in the column', () => {
+    // Row 0 End has no Begin (would jump to the start); row 1 End has its Begin at col 2.
+    const sheet = sheetOf((s) => {
+      setBlock(s, 0, 5, note(pitched));
+      setBlock(s, 2, 1, begin);
+      setBlock(s, 3, 0, end);
+      setBlock(s, 3, 1, end);
+    });
+    // First arrival at col 3 jumps to 2 (row 1); then row 0 End jumps to the start.
+    expect(cols(sheet).slice(0, 7)).toEqual([0, 1, 2, 3, 2, 3, 0]);
+  });
+
+  it('T23: of two Ends with Begins, the one with the closer Begin jumps first', () => {
+    const sheet = sheetOf((s) => {
+      setBlock(s, 0, 0, begin);
+      setBlock(s, 2, 1, begin);
+      setBlock(s, 4, 0, end);
+      setBlock(s, 4, 1, end);
+    });
+    expect(cols(sheet).slice(0, 8)).toEqual([0, 1, 2, 3, 4, 2, 3, 4]);
+  });
+
   it('deeply nested repeats double per level yet still end', () => {
     // Fourteen nested repeats (one per row) replay about 2^14 times over 28 columns: far past the cap.
     const sheet = sheetOf((s) => {

@@ -18,6 +18,7 @@ export interface TransportProps {
   listeningId: string | null;
   onListen: (id: string) => void;
   onPlayPause: () => void;
+  onPlayFromStart: () => void;
   onStop: () => void;
   onLoopSelection: (on: boolean) => void;
   onFollow: (on: boolean) => void;
@@ -63,6 +64,15 @@ export function Transport(p: TransportProps) {
         >
           {playing ? 'Pause' : p.transport === 'paused' ? 'Resume' : 'Play'}
           {keyHint('playPause') && <kbd className="ml-1 text-xs opacity-70">{keyHint('playPause').slice(2, -1)}</kbd>}
+        </button>
+        <button
+          type="button"
+          data-testid="transport-play-start"
+          title="Play from the beginning of the song"
+          onClick={p.onPlayFromStart}
+          className={btn}
+        >
+          Play from Beginning
         </button>
         <button
           type="button"

@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { useStore } from 'zustand';
 import { hasDirectoryPicker, pickFolder } from '../audio/folderPick.ts';
+import { DropArea } from './DropArea.tsx';
 import { topLevelFiles } from '../audio/names.ts';
 import { humaniseKey } from '../core/sheet/palette.ts';
 import type { AudioSession } from './audioSession.ts';
@@ -37,10 +38,10 @@ export function SoundsSection({ session }: { session: AudioSession }) {
   const missingList = Object.entries(missing);
 
   return (
-    <div data-testid="sounds-section" className="space-y-2">
+    <DropArea testId="sounds-section" disabled={busy !== null || !opfs} onFiles={(files) => void session.importSoundFiles(files)}>
       <p className="text-sm text-slate-300">
         Growtopia's note sounds come from your own game install; they are copied into this browser and never uploaded. Without them the app plays
-        simple placeholder tones.
+        simple placeholder tones. You can also drop the folder (or its files) here.
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <button
@@ -140,6 +141,6 @@ export function SoundsSection({ session }: { session: AudioSession }) {
           </tbody>
         </table>
       )}
-    </div>
+    </DropArea>
   );
 }

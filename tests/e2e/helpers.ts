@@ -8,6 +8,7 @@ export interface MtsHooks {
     getSheet(): { cells: Record<string, unknown>; worldBpm: number };
     getSelection(): unknown;
     getPlayhead(): number | null;
+    getCue(): number | null;
     getEngineState(): { transport: string; contextState: string | null; contextTime: number | null; passStarts: number[]; auditions: number };
     getSounds(): { expected: number; stored: number; decoded: number; placeholders: boolean; missing: Record<string, number[]> };
     getIconSet(): { mode: 'original' | 'game'; images: number; drawn: number };
@@ -81,4 +82,13 @@ export async function samplePlayhead(page: Page, ms: number, everyMs = 50): Prom
     await page.waitForTimeout(everyMs);
   }
   return seen;
+}
+
+export const cue = (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsTest!.getCue());
+
+/** A point on the band under the grid, in the column `col` (T26). The band is 14 px tall, right under the last row. */
+export async function bandPoint(page: Page, col: number) {
+  const p = await point(page, col, 13);
+  const { cellSize } = await page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsView!.getViewport());
+  return { x: p.x, y: p.y + cellSize / 2 + 7 };
 }

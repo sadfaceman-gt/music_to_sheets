@@ -180,3 +180,25 @@ test.describe('WebGPU guide', () => {
     await expect(page.getByTestId('webgpu-guide')).toHaveCount(0);
   });
 });
+
+test('T20: dropping files onto the sound section imports them like a picked folder', async ({ page }) => {
+  await openFirstRun(page);
+  const some = soundFolder(profile).slice(0, 3).map((f) => ({ name: f.name, type: f.mimeType, data: f.buffer.toString('base64') }));
+  await page.getByTestId('sounds-section').evaluate((el, files) => {
+    // The test tsconfig has no DOM lib, so the browser classes come off globalThis.
+    const g = globalThis as unknown as {
+      DataTransfer: new () => { items: { add(f: unknown): void } };
+      DragEvent: new (type: string, init: object) => unknown;
+      File: new (parts: unknown[], name: string, opts: object) => unknown;
+    };
+    const dt = new g.DataTransfer();
+    for (const f of files) {
+      const bytes = Uint8Array.from(atob(f.data), (c) => c.charCodeAt(0));
+      dt.items.add(new g.File([bytes], f.name, { type: f.type }));
+    }
+    const fire = (type: string) => (el as unknown as { dispatchEvent(e: unknown): void }).dispatchEvent(new g.DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
+    fire('dragover');
+    fire('drop');
+  }, some);
+  await expect(page.getByTestId('sound-found')).toHaveText(`3 of ${total} files found`, { timeout: 30_000 });
+});
