@@ -333,3 +333,46 @@ describe('setColumns', () => {
     expect(st().sheet.worldBpm).toBe(profile.timing.bpmMin);
   });
 });
+
+describe('replaceSheet', () => {
+  const other = (): Sheet => ({
+    rows: 14,
+    cols: 40,
+    cells: { '3,4': { block: { type: 'note', instrument: 'piano', accidental: 'natural' } } },
+    timeSignatures: [{ col: 0, n: 3, m: 4 }],
+    worldBpm: 77,
+  });
+
+  it('is one undo step, clears selection and report, and redo brings the new sheet back', () => {
+    const s = store();
+    s.getState().selectPalette('bass:sharp');
+    s.getState().paint({ col: 1, row: 2 });
+    s.getState().setSelection(rect(0, 0, 2, 2));
+    s.getState().paste({ col: 0, row: 0 });
+    expect(s.getState().lastReport.length).toBeGreaterThan(0);
+    const old = s.getState().sheet;
+    s.getState().replaceSheet(other(), 'Open GMSF');
+    const now = s.getState();
+    expect(now.sheet).toEqual(other());
+    expect(now.selection).toBeNull();
+    expect(now.lastReport).toEqual([]);
+    expect(now.undoDepth).toBe(2);
+    now.undo();
+    expect(s.getState().sheet).toEqual(old);
+    s.getState().redo();
+    expect(s.getState().sheet).toEqual(other());
+  });
+
+  it('ends an open batch first, so the batch and the replace are separate steps', () => {
+    const s = store();
+    s.getState().selectPalette('bass:sharp');
+    s.getState().beginBatch('Paint');
+    s.getState().paint({ col: 1, row: 2 });
+    s.getState().replaceSheet(other(), 'Open GMSF');
+    expect(s.getState().undoDepth).toBe(2);
+    s.getState().undo();
+    expect(Object.keys(s.getState().sheet.cells)).toEqual(['1,2']);
+    s.getState().undo();
+    expect(s.getState().sheet.cells).toEqual({});
+  });
+});

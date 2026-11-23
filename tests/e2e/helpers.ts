@@ -15,6 +15,8 @@ export interface MtsHooks {
     getAuditions(): { instrument: string; file: number; gain: number; col: number; row: number }[][];
     getMuteSolo(): { muted: string[]; solo: string[] };
     getUndoDepth(): number;
+    getSongName(): string | null;
+    getLastImport(): { issues: number; skipped: number; warnings: number; supported: boolean } | null;
   };
   __mtsView?: { cellToClient(c: number, r: number): { x: number; y: number }; getViewport(): { cellSize: number; scrollCol: number } };
 }
