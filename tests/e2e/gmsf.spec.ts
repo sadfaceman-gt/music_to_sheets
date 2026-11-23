@@ -122,6 +122,36 @@ test('Cancel in the save dialog downloads nothing and an unnamed song saves as u
   await expect(page.getByTestId('save-dialog')).toHaveCount(0);
 });
 
+test('T31: up to 5 Rack moves are listed; more collapse into a count with a scrollable list', async ({ page }) => {
+  const racks = Array.from({ length: 7 }, (_, i) => ({ col: i + 1, row: 2, rack: { notes: [[noteId('piano'), 3]] as [number, number][], volume: 100 } }));
+  await openViaPicker(page, 'racks.GMSF', { cols: 40, bpm: 100, blocks: [], racks });
+  await page.getByTestId('close-import-report').click({ timeout: 1000 }).catch(() => {});
+  const save = async () => {
+    await page.getByTestId('save-gmsf').click();
+    await expect(page.getByTestId('save-dialog')).toBeVisible();
+  };
+  // Stack a sheet note on 5 Racks: all five moves are listed directly.
+  for (let c = 1; c <= 5; c++) await click(page, c, 2);
+  await save();
+  await expect(page.getByTestId('save-fixes-toggle')).toHaveCount(0);
+  await expect(page.getByTestId('save-fixes').locator('li')).toHaveCount(5);
+  await page.getByTestId('cancel-save').click();
+  // Two more make 7: collapsed to a count until the arrow is clicked.
+  for (let c = 6; c <= 7; c++) await click(page, c, 2);
+  await save();
+  const toggle = page.getByTestId('save-fixes-toggle');
+  await expect(toggle).toContainText('7 Racks moved or merged');
+  await expect(page.getByTestId('save-fixes')).toHaveCount(0);
+  await toggle.click();
+  const list = page.getByTestId('save-fixes');
+  await expect(list.locator('li')).toHaveCount(7);
+  const box = await list.boundingBox();
+  expect(box!.height).toBeLessThan(7 * 24);
+  expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+  await toggle.click();
+  await expect(page.getByTestId('save-fixes')).toHaveCount(0);
+});
+
 test('the import report lists unknown IDs in the grid and in a Rack slot', async ({ page }) => {
   await openViaPicker(page, 'odd.GMSF', {
     cols: 50,

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import type { GameProfile } from '../core/profile/schema.ts';
 import type { GmsfIssue, GmsfReadResult, GmsfWriteResult, WorldSupport } from '../core/gmsf/types.ts';
@@ -87,6 +88,37 @@ export function ImportReport({ profile, fileName, result, support, onClose }: { 
   );
 }
 
+const FIXES_INLINE_MAX = 5;
+
+/** Up to 5 fixes are listed as they are; more collapse into a count with a toggle that opens a scrollable box of about 5 lines. */
+function FixList({ lines }: { lines: string[] }) {
+  const [open, setOpen] = useState(false);
+  if (lines.length <= FIXES_INLINE_MAX) {
+    return (
+      <ul data-testid="save-fixes" className="mb-2 list-disc pl-5 text-slate-300">
+        {lines.map((l, n) => (
+          <li key={n}>{l}</li>
+        ))}
+      </ul>
+    );
+  }
+  return (
+    <div className="mb-2 text-slate-300">
+      <button type="button" data-testid="save-fixes-toggle" aria-expanded={open} className="flex items-center gap-1 hover:text-slate-50" onClick={() => setOpen(!open)}>
+        <span>{lines.length} Racks moved or merged</span>
+        <span aria-hidden="true">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <ul data-testid="save-fixes" className="mt-1 max-h-[7.5rem] list-disc overflow-y-auto rounded border border-slate-700 bg-slate-950/50 py-1 pl-6 pr-2 leading-6">
+          {lines.map((l, n) => (
+            <li key={n}>{l}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function SaveDialog({ profile, result, fileName, onSave, onCancel }: { profile: GameProfile; result: GmsfWriteResult; fileName: string; onSave: () => void; onCancel: () => void }) {
   const fixLines = result.fixes.map((f) => {
     if (f.kind === 'moved') return `Rack moved from ${cellLabel(profile, f.from)} to ${cellLabel(profile, f.to)}`;
@@ -105,11 +137,7 @@ export function SaveDialog({ profile, result, fileName, onSave, onCancel }: { pr
         {fixLines.length > 0 && (
           <>
             <h3 className="font-semibold">Racks moved or merged</h3>
-            <ul data-testid="save-fixes" className="mb-2 list-disc pl-5 text-slate-300">
-              {fixLines.map((l, n) => (
-                <li key={n}>{l}</li>
-              ))}
-            </ul>
+            <FixList lines={fixLines} />
           </>
         )}
         {result.unplaced.length > 0 && (
