@@ -55,7 +55,7 @@ function fresh(cols = 20): Sheet {
 describe('sheet basics', () => {
   it('creates an empty strip of profile rows', () => {
     const s = createSheet(profile);
-    expect(s).toEqual({ rows: 14, cols: 400, cells: {}, timeSignatures: [{ col: 0, n: 4, m: 4 }] });
+    expect(s).toEqual({ rows: 14, cols: 400, cells: {}, timeSignatures: [{ col: 0, n: 4, m: 4 }], worldBpm: profile.timing.bpmDefault });
     expect(createSheet(profile, 30).cols).toBe(30);
   });
 
@@ -165,6 +165,16 @@ describe('erase', () => {
     expect(erase(profile, s, rect(0, 0, 2, 2)).changed).toBe(2);
     expect(Object.keys(s.cells)).toEqual(['5,5']);
     expect(erase(profile, s, rect(0, 0, 2, 2)).changed).toBe(0);
+  });
+
+  it('T25: with blocksOnly the Gear stays and cells without a block are not counted', () => {
+    const s = fresh();
+    const gear = gearOf([gn('piano', 'c')]);
+    put(s, 0, 0, { ...noteCell('piano'), gear });
+    put(s, 1, 0, { gear });
+    expect(erase(profile, s, rect(0, 0, 1, 0), true).changed).toBe(1);
+    expect(getCell(s, 0, 0)).toEqual({ gear });
+    expect(getCell(s, 1, 0)).toEqual({ gear });
   });
 });
 

@@ -38,6 +38,15 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium firefox
+      # CI runners have no audio device, so Firefox keeps its AudioContext suspended. A PulseAudio
+      # server with a null sink gives it a silent output, as on a real machine.
+      - name: Silent audio output for Firefox
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q pulseaudio
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=ci_null
+          pactl set-default-sink ci_null
       - run: npm run e2e
       - uses: actions/upload-artifact@v7
         if: failure()

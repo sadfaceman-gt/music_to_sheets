@@ -5,7 +5,7 @@ import { barsInRange, sigLabel, signaturesOf } from '../../core/sheet/timeSig.ts
 import { cellKey, parseCellKey } from '../../core/sheet/types.ts';
 import type { Cell, CellPos, CellRect, Sheet } from '../../core/sheet/types.ts';
 import { instrumentColors, THEME } from './colors.ts';
-import { cellOrigin, GUTTER_W, HEADER_H, SIG_ROW_H, minimapCols, minimapX, viewCols, visibleCols } from './viewport.ts';
+import { BAND_H, bandTop, cellOrigin, GUTTER_W, HEADER_H, SIG_ROW_H, minimapCols, minimapX, viewCols, visibleCols } from './viewport.ts';
 import type { Viewport } from './viewport.ts';
 
 export interface DrawParams {
@@ -24,9 +24,27 @@ export interface DrawParams {
   ghost?: Cell | null;
   /** The measure bar picked for a time signature change (T19). */
   selectedBar?: number | null;
+  /** The player's block images by block kind id (palette id; Rack shares "gear"); a kind without one keeps its original icon. */
+  icons?: ReadonlyMap<string, ImageBitmap>;
+  /** Column under the playhead while playing. */
+  playhead?: number | null;
+  /** Column where playback will start (the tracking bar while stopped). */
+  cue?: number | null;
+  /** False while playing: the band under the grid can't be used then. */
+  bandEnabled?: boolean;
 }
 
 const FONT = 'system-ui, sans-serif';
+
+/** Counts game images drawn since the page loaded (Playwright reads it to see that "Your game images" is in use). */
+export const drawStats = { images: 0 };
+
+/** Block kind id of a cell's block (the palette id, see core/blockImages), or null for a Gear-only cell. */
+function iconKey(cell: Cell): string | null {
+  const block = cell.block;
+  if (!block) return cell.gear ? 'gear' : null;
+  return block.type === 'note' ? `${block.instrument}:${block.accidental}` : block.type;
+}
 
 export function draw(ctx: CanvasRenderingContext2D, p: DrawParams): void {
   const { profile, sheet, viewport: vp, width, height } = p;
@@ -154,7 +172,7 @@ export function draw(ctx: CanvasRenderingContext2D, p: DrawParams): void {
         const cell = sheet.cells[cellKey(col, row)];
         if (!cell) continue;
         const { x, y } = cellOrigin(vp, col, row);
-        drawCell(ctx, profile, cell, x, y, cs, colors, isBedrock(profile, col, row));
+        drawCell(ctx, profile, cell, x, y, cs, colors, isBedrock(profile, col, row), p.icons);
       }
     }
   }
@@ -180,7 +198,7 @@ export function draw(ctx: CanvasRenderingContext2D, p: DrawParams): void {
     ctx.strokeRect(x + 0.5, y + 0.5, cs - 1, cs - 1);
     if (p.ghost) {
       ctx.globalAlpha = 0.55;
-      drawCell(ctx, profile, p.ghost, x, y, cs, colors, isBedrock(profile, p.hover.col, p.hover.row));
+      drawCell(ctx, profile, p.ghost, x, y, cs, colors, isBedrock(profile, p.hover.col, p.hover.row), p.icons);
       ctx.globalAlpha = 1;
     }
   }
@@ -194,6 +212,25 @@ export function draw(ctx: CanvasRenderingContext2D, p: DrawParams): void {
     ctx.strokeStyle = THEME.selectionStroke;
     ctx.lineWidth = 2;
     ctx.strokeRect(a.x + 1, a.y + 1, w - 2, h - 2);
+  }
+  // The band under the grid, the tracking bar (playhead, or the start column while stopped) and its handle (T26).
+  const bandY = bandTop(sheet.rows, cs, height);
+  ctx.fillStyle = p.bandEnabled === false ? THEME.bandDisabled : THEME.band;
+  ctx.fillRect(GUTTER_W, bandY, width - GUTTER_W, BAND_H);
+  const marker = p.playhead ?? p.cue ?? null;
+  if (marker != null) {
+    const { x } = cellOrigin(vp, marker, 0);
+    ctx.fillStyle = THEME.playheadFill;
+    ctx.fillRect(x, HEADER_H, cs, bandY - HEADER_H);
+    ctx.strokeStyle = THEME.playhead;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x + cs / 2, HEADER_H);
+    ctx.lineTo(x + cs / 2, bandY + BAND_H);
+    ctx.stroke();
+    ctx.fillStyle = THEME.playhead;
+    roundedRect(ctx, x + cs / 2 - 5, bandY + 1, 10, BAND_H - 2, 3);
+    ctx.fill();
   }
   ctx.restore();
 
@@ -330,6 +367,7 @@ function drawCell(
   cs: number,
   colors: Map<string, string>,
   bedrock: boolean,
+  icons?: ReadonlyMap<string, ImageBitmap>,
 ): void {
   const pad = Math.max(1, cs * 0.12);
   const s = cs - pad * 2;
@@ -337,9 +375,17 @@ function drawCell(
   const by = y + pad;
   const block = cell.block;
   const showText = cs >= 14;
+  const image = block ? icons?.get(iconKey(cell) ?? '') : undefined;
+  const gearImage = cell.gear ? icons?.get('gear') : undefined;
+  // Game images fill the whole cell, inside the grid lines (T22).
+  const inset = cs >= 14 ? 1 : 0.5;
+  const full = cs - inset * 2;
 
   if (block) {
-    if (block.type === 'note') {
+    if (image) {
+      ctx.drawImage(image, x + inset, y + inset, full, full);
+      drawStats.images++;
+    } else if (block.type === 'note') {
       const fill = colors.get(block.instrument) ?? THEME.blank;
       roundedRect(ctx, bx, by, s, s, s * 0.22);
       ctx.fillStyle = fill;
@@ -381,7 +427,12 @@ function drawCell(
     const dashed = gear.kind === 'rack';
     ctx.save();
     ctx.setLineDash(dashed ? [Math.max(2, cs * 0.12), Math.max(2, cs * 0.1)] : []);
-    if (!block) {
+    if (gearImage) {
+      // The Gear/Rack image sits in the bottom left so the note behind it stays visible (T24).
+      const g = Math.round(cs * 0.5);
+      ctx.drawImage(gearImage, x + inset, y + cs - inset - g, g, g);
+      drawStats.images++;
+    } else if (!block) {
       ctx.strokeStyle = THEME.badgeText;
       ctx.lineWidth = 1;
       roundedRect(ctx, bx + 0.5, by + 0.5, s - 1, s - 1, s * 0.22);
@@ -439,6 +490,8 @@ export interface MinimapParams {
   width: number;
   height: number;
   dpr: number;
+  /** Column under the playhead while playing. */
+  playhead?: number | null;
 }
 
 export function drawMinimap(ctx: CanvasRenderingContext2D, p: MinimapParams): void {
@@ -494,6 +547,16 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, p: MinimapParams): vo
   ctx.moveTo(Math.round(wx), 0);
   ctx.lineTo(Math.round(wx), height);
   ctx.stroke();
+
+  if (p.playhead != null) {
+    const px = Math.round(minimapX(p.playhead, width, total)) + 0.5;
+    ctx.strokeStyle = THEME.playhead;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(px, 0);
+    ctx.lineTo(px, height);
+    ctx.stroke();
+  }
 
   const span = viewCols(vp, p.mainWidth);
   const x0 = minimapX(vp.scrollCol, width, total);

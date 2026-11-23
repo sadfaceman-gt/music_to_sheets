@@ -12,7 +12,13 @@ import { createEditorStore, useEditor } from './store.ts';
 import type { EditorStore } from './store.ts';
 import { Toolbar } from './Toolbar.tsx';
 import { isTypingTarget } from './dom.ts';
-import { bindableKey, bindKey, loadBindings, loadShortcutsEnabled, saveBindings, saveShortcutsEnabled, toolBindingId, unbind } from './shortcuts.ts';
+import { actionBindingId, bindableKey, bindKey, loadBindings, loadShortcutsEnabled, saveBindings, saveShortcutsEnabled, toolBindingId, unbind } from './shortcuts.ts';
+import { buildTimeline } from '../core/playback/timeline.ts';
+import type { AudioSession } from '../app/audioSession.ts';
+import { useStore } from 'zustand';
+import { notesAt } from './auditionNotes.ts';
+import { Transport } from './Transport.tsx';
+import { drawStats } from './view/draw.ts';
 import type { Bindings } from './shortcuts.ts';
 import { DEFAULT_ROW_COLOR_PROFILE } from './view/rowColors.ts';
 import { cellsOnLine, PAINT_CURSOR, TOOLS } from './tools.ts';
@@ -21,9 +27,10 @@ import { StripView } from './view/StripView.tsx';
 import type { CellPointerEvent } from './view/StripView.tsx';
 
 const OCTAVE = 12;
+const ACTION_PREFIX = actionBindingId('');
 
 type Drag =
-  | { kind: 'paint' | 'erase'; last: CellPos }
+  | { kind: 'paint' | 'erase'; last: CellPos; blocksOnly?: boolean }
   | { kind: 'none' }
   | { kind: 'box'; anchor: CellPos }
   | { kind: 'move'; start: CellPos; orig: CellRect };
@@ -53,6 +60,7 @@ function useShortcuts(
   bindings: Bindings,
   listening: { current: string | null },
   pickBlock: (id: string) => void,
+  onAction: (action: string) => void,
 ) {
   useEffect(() => {
     if (!enabled) return;
@@ -122,16 +130,36 @@ function useShortcuts(
       if (!target) return;
       const tool = TOOLS.find((t) => toolBindingId(t.id) === target);
       if (tool) setTool(tool.id);
-      else pickBlock(target);
+      else if (target.startsWith(ACTION_PREFIX)) {
+        handled();
+        onAction(target.slice(ACTION_PREFIX.length));
+      } else pickBlock(target);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [store, enabled, hoverRef, setTool, keysEnabled, bindings, listening, pickBlock]);
+  }, [store, enabled, hoverRef, setTool, keysEnabled, bindings, listening, pickBlock, onAction]);
 }
 
-export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { profile: GameProfile; rowColors?: string }) {
+export function Editor({ profile, session, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { profile: GameProfile; session: AudioSession; rowColors?: string }) {
   const [store] = useState<EditorStore>(() => createEditorStore(profile));
   const sheet = useEditor(store, (s) => s.sheet);
+  const transport = useStore(session.store, (s) => s.transport);
+  const playhead = useStore(session.store, (s) => s.playhead);
+  const muted = useStore(session.store, (s) => s.muted);
+  const solo = useStore(session.store, (s) => s.solo);
+  const placeholders = useStore(session.store, (s) => s.placeholders);
+  const imageVersion = useStore(session.store, (s) => s.imageVersion);
+  const useGameImages = useStore(session.store, (s) => s.useGameImages);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the icon map changes with the bitmaps and the switch
+  const icons = useMemo(() => session.icons(), [session, imageVersion, useGameImages]);
+  const [loopSelection, setLoopSelection] = useState(false);
+  const [follow, setFollow] = useState(true);
+  // Where playback starts: the tracking bar shown while stopped, set from the band under the grid (T26).
+  const [cue, setCue] = useState<number | null>(null);
+  const cueRef = useRef<number | null>(null);
+  useEffect(() => {
+    cueRef.current = cue;
+  }, [cue]);
   const selection = useEditor(store, (s) => s.selection);
   const paletteId = useEditor(store, (s) => s.paletteId);
   const report = useEditor(store, (s) => s.lastReport);
@@ -162,7 +190,73 @@ export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { pro
     },
     [store],
   );
-  useShortcuts(store, true, hoverRef, setTool, keysEnabled, bindings, listening, pickBlock);
+  // What the running playback was built from: only a real change is sent on, so a loop with carried-over repeat state isn't restarted.
+  const playedWith = useRef<{ sheet: unknown; selection: unknown; make: unknown } | null>(null);
+  // Transport (M1b). The timeline is rebuilt from the sheet whenever it is needed; the engine swaps it in at the
+  // next pass start, so editing or changing the BPM while playing never glitches the current pass.
+  const makeTimeline = useCallback(() => {
+    const { sheet: current, selection: sel } = store.getState();
+    return buildTimeline(profile, current, loopSelection && sel ? { range: { start: sel.col0, end: sel.col1 } } : {});
+  }, [store, profile, loopSelection]);
+  /** Starts playback from `from` (a column), or from the beginning; a column outside the song resets the bar to the start. */
+  const startPlayback = useCallback(
+    (from: number | null) => {
+      const timeline = makeTimeline();
+      if (timeline.ticks.length === 0) {
+        store.setState({ lastReport: ['Nothing to play: paint some blocks first'] });
+        return;
+      }
+      const start = timeline.window?.start ?? 0;
+      const col = from !== null && timeline.ticks.some((t) => t.col === from) ? from : start;
+      setCue(col);
+      store.setState({ lastReport: timeline.skipped.length > 0 ? [`${timeline.skipped.length} notes can't be played (${timeline.skipped[0]?.reason})`] : [] });
+      session.play(timeline, col);
+      const now = store.getState();
+      playedWith.current = { sheet: now.sheet, selection: now.selection, make: makeTimeline };
+    },
+    [session, store, makeTimeline],
+  );
+  const playPause = useCallback(() => {
+    if (session.togglePause()) return;
+    startPlayback(cue);
+  }, [session, startPlayback, cue]);
+  const playFromStart = useCallback(() => {
+    session.stop();
+    startPlayback(null);
+  }, [session, startPlayback]);
+  // The band under the grid: only while stopped or paused (a paused song restarts from the new bar). A bar dropped
+  // outside the song goes back to the start when released.
+  const onCue = useCallback(
+    (col: number, final: boolean) => {
+      if (session.state.transport === 'playing') return;
+      if (session.state.transport === 'paused') session.stop();
+      if (!final) {
+        setCue(col);
+        return;
+      }
+      const timeline = makeTimeline();
+      const w = timeline.window;
+      setCue(w && col >= w.start && col <= w.end ? col : w ? w.start : null);
+    },
+    [session, makeTimeline],
+  );
+  const stopPlayback = useCallback(() => session.stop(), [session]);
+  const onAction = useCallback(
+    (action: string) => {
+      if (action === 'playPause') playPause();
+      else if (action === 'stop') stopPlayback();
+    },
+    [playPause, stopPlayback],
+  );
+  useEffect(() => {
+    if (transport === 'stopped') return;
+    const p = playedWith.current;
+    if (p && p.sheet === sheet && p.selection === selection && p.make === makeTimeline) return;
+    const timeline = makeTimeline();
+    if (timeline.ticks.length > 0) session.setTimeline(timeline);
+  }, [sheet, selection, transport, makeTimeline, session]);
+
+  useShortcuts(store, true, hoverRef, setTool, keysEnabled, bindings, listening, pickBlock, onAction);
 
   // While a palette block waits for a key (after a right-click): a key binds it, Escape removes its shortcut.
   useEffect(() => {
@@ -245,11 +339,26 @@ export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { pro
       getCell: (col, row) => structuredClone(getCell(store.getState().sheet, col, row) ?? null),
       getSheet: () => structuredClone(store.getState().sheet),
       getSelection: () => structuredClone(store.getState().selection),
+      getPlayhead: () => session.state.playhead,
+      getCue: () => cueRef.current,
+      getEngineState: () => session.debug(),
+      getSounds: () => {
+        const s = session.state;
+        return { expected: s.expected, stored: s.stored, decoded: s.decoded, placeholders: s.placeholders, missing: s.missing };
+      },
+      getIconSet: () => ({
+        mode: session.state.useGameImages && session.state.mapping ? 'game' : 'original',
+        images: session.icons()?.size ?? 0,
+        drawn: drawStats.images,
+      }),
+      getAuditions: () => session.auditionLog.map((notes) => notes.map((n) => ({ instrument: n.instrument, file: n.file, gain: n.gain, col: n.source.col, row: n.source.row }))),
+      getMuteSolo: () => ({ muted: [...session.state.muted], solo: [...session.state.solo] }),
+      getUndoDepth: () => store.getState().undoDepth,
     };
     return () => {
       delete window.__mtsTest;
     };
-  }, [store]);
+  }, [store, session]);
 
   const updateHover = (pos: CellPos | null) => {
     hoverRef.current = pos;
@@ -274,6 +383,12 @@ export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { pro
         return;
       }
       if (e.button !== 0) return;
+      if (tool === 'audition') {
+        // Click: hear this cell (block and Gear); Shift-click: the whole column.
+        session.audition(notesAt(profile, s.sheet, pos, e.shiftKey));
+        drag.current = { kind: 'none' };
+        return;
+      }
       if (tool === 'paint') {
         const entry = paletteEntries(profile).find((x) => x.id === s.paletteId);
         const cellNow = getCell(s.sheet, pos.col, pos.row);
@@ -283,13 +398,17 @@ export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { pro
           drag.current = { kind: 'none' };
         } else if (entry?.paint.kind === 'block' && sameBlock(entry.paint.block, cellNow?.block)) {
           // The same block again erases it, and a drag erases everything it crosses (T5).
+          // An Audio Gear or Rack in the cell stays (T25).
           s.beginBatch('Erase');
-          s.erase(cellRect(pos));
-          drag.current = { kind: 'erase', last: pos };
+          s.erase(cellRect(pos), true);
+          drag.current = { kind: 'erase', last: pos, blocksOnly: true };
         } else {
           s.beginBatch('Paint');
           s.paint(pos);
           drag.current = { kind: 'paint', last: pos };
+          // Paint preview: the note just placed plays once (a drag only previews its first cell).
+          const painted = getCell(store.getState().sheet, pos.col, pos.row);
+          if (painted?.block?.type === 'note') session.audition(notesAt(profile, store.getState().sheet, pos).filter((n) => n.source.kind === 'block'));
         }
       } else if (tool === 'erase') {
         s.beginBatch('Erase');
@@ -314,8 +433,16 @@ export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { pro
       const pos = e.pos;
       if (d.kind === 'paint' || d.kind === 'erase') {
         for (const c of cellsOnLine(d.last, pos).slice(1)) {
-          if (d.kind === 'paint') s.paint(c);
-          else s.erase(cellRect(c));
+          if (d.kind === 'paint') {
+            const before = getCell(s.sheet, c.col, c.row)?.block;
+            s.paint(c);
+            // Every note a drag newly places plays once (T28).
+            const after = store.getState().sheet;
+            const placed = getCell(after, c.col, c.row);
+            if (placed?.block?.type === 'note' && !sameBlock(placed.block, before)) {
+              session.audition(notesAt(profile, after, c).filter((n) => n.source.kind === 'block'));
+            }
+          } else s.erase(cellRect(c), d.blocksOnly === true);
         }
         d.last = pos;
       } else if (d.kind === 'box') {
@@ -387,10 +514,40 @@ export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { pro
         onSwapInstrument={(i) => store.getState().swapInstrument(i)}
         onVolume={(v) => store.getState().setVolume(v)}
       />
+      <Transport
+        profile={profile}
+        transport={transport}
+        bpm={sheet.worldBpm}
+        loopSelection={loopSelection}
+        hasSelection={selection !== null}
+        follow={follow}
+        placeholders={placeholders}
+        bindings={bindings}
+        listeningId={listeningId}
+        onListen={setListening}
+        onPlayPause={playPause}
+        onPlayFromStart={playFromStart}
+        onStop={stopPlayback}
+        onLoopSelection={setLoopSelection}
+        onFollow={setFollow}
+        onBpm={(n) => store.getState().setWorldBpm(n)}
+      />
       <div className="flex min-h-0 flex-1">
-        <Palette profile={profile} selectedId={tool === 'paint' ? paletteId : null} onSelect={selectPalette} bindings={bindings} listeningId={listeningId} onListen={setListening} />
+        <Palette
+          profile={profile}
+          selectedId={tool === 'paint' ? paletteId : null}
+          onSelect={selectPalette}
+          bindings={bindings}
+          listeningId={listeningId}
+          onListen={setListening}
+          muted={muted}
+          solo={solo}
+          onToggleMute={(i) => session.toggleMute(i)}
+          onToggleSolo={(i) => session.toggleSolo(i)}
+          icons={icons}
+        />
         <div className="min-w-0 flex-1" onPointerLeave={() => updateHover(null)}>
-          <StripView profile={profile} sheet={sheet} selection={selection} cursor={cursor} rowColors={rowColors} ghost={ghost} selectedBar={selectedBar} onBarSelect={setSelectedBar} onCellPointer={onCellPointer} />
+          <StripView profile={profile} sheet={sheet} selection={selection} cursor={cursor} rowColors={rowColors} ghost={ghost} selectedBar={selectedBar} onBarSelect={setSelectedBar} onCellPointer={onCellPointer} icons={icons} playhead={playhead} follow={follow} cue={cue} onCue={onCue} bandEnabled={transport !== 'playing'} />
         </div>
         {gearCell && (
           <GearEditor
@@ -400,6 +557,7 @@ export function Editor({ profile, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { pro
             initial={gearInitial}
             onDraft={onDraft}
             brush={brush}
+            icons={icons}
             onRemove={() => {
               draftRef.current = null;
               store.getState().setGear(gearCell.pos, null);

@@ -13,6 +13,8 @@ import {
   HEADER_H,
   SIG_ROW_H,
   clampScroll,
+  BAND_H,
+  bandTop,
   DEFAULT_VIEWPORT,
   minimapCols,
   minimapToScroll,
@@ -48,6 +50,17 @@ export interface StripViewProps {
   onBarSelect?: (col: number | null) => void;
   onCellPointer?: (e: CellPointerEvent) => void;
   onViewportChange?: (vp: Viewport) => void;
+  /** The player's block images by block kind id; drawn instead of the original icons (M1b). */
+  icons?: ReadonlyMap<string, ImageBitmap>;
+  /** Column under the playhead (null = none), and whether the view scrolls to keep it visible. */
+  playhead?: number | null;
+  follow?: boolean;
+  /** Column where playback will start, shown as the tracking bar while stopped (T26). */
+  cue?: number | null;
+  /** Sets the start column from the band under the grid; `final` is true when the pointer is released. */
+  onCue?: (col: number, final: boolean) => void;
+  /** False while playing: the band ignores clicks. */
+  bandEnabled?: boolean;
 }
 
 const MINIMAP_H = 44;
@@ -69,7 +82,7 @@ function fitCanvas(canvas: HTMLCanvasElement, w: number, h: number, dpr: number)
   return canvas.getContext('2d');
 }
 
-export function StripView({ profile, sheet, selection, cursor, rowColors, ghost, selectedBar, onBarSelect, onCellPointer, onViewportChange }: StripViewProps) {
+export function StripView({ profile, sheet, selection, cursor, rowColors, ghost, selectedBar, onBarSelect, onCellPointer, onViewportChange, icons, playhead, follow, cue, onCue, bandEnabled = true }: StripViewProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const miniRef = useRef<HTMLCanvasElement>(null);
@@ -80,7 +93,7 @@ export function StripView({ profile, sheet, selection, cursor, rowColors, ghost,
   const [panning, setPanning] = useState(false);
 
   // Latest values for event handlers (written in an effect, never during render).
-  const latest = useRef({ vp, size, sheet, profile, onCellPointer, onViewportChange, onBarSelect });
+  const latest = useRef({ vp, size, sheet, profile, onCellPointer, onViewportChange, onBarSelect, onCue, bandEnabled });
   useLayoutEffect(() => {
     latest.current.size = size;
     latest.current.sheet = sheet;
@@ -88,11 +101,14 @@ export function StripView({ profile, sheet, selection, cursor, rowColors, ghost,
     latest.current.onCellPointer = onCellPointer;
     latest.current.onBarSelect = onBarSelect;
     latest.current.onViewportChange = onViewportChange;
+    latest.current.onCue = onCue;
+    latest.current.bandEnabled = bandEnabled;
   });
   const drag = useRef<
     | { kind: 'cells'; pointerId: number }
     | { kind: 'pan'; pointerId: number; startX: number; startScroll: number }
     | { kind: 'mini'; pointerId: number }
+    | { kind: 'band'; pointerId: number }
     | null
   >(null);
   const spaceRef = useRef(false);
@@ -134,13 +150,19 @@ export function StripView({ profile, sheet, selection, cursor, rowColors, ghost,
       const dpr = window.devicePixelRatio || 1;
       const canvas = canvasRef.current;
       const ctx = canvas && fitCanvas(canvas, size.w, size.h, dpr);
-      if (ctx) draw(ctx, { profile, sheet, viewport: vp, selection, hover, width: size.w, height: size.h, dpr, rowBands: rowBands(rowColors ?? DEFAULT_ROW_COLOR_PROFILE, sheet.rows), ghost, selectedBar });
+      if (ctx) draw(ctx, { profile, sheet, viewport: vp, selection, hover, width: size.w, height: size.h, dpr, rowBands: rowBands(rowColors ?? DEFAULT_ROW_COLOR_PROFILE, sheet.rows), ghost, selectedBar, icons, playhead, cue, bandEnabled });
       const mini = miniRef.current;
       const mctx = mini && fitCanvas(mini, size.w, MINIMAP_H, dpr);
-      if (mctx) drawMinimap(mctx, { profile, sheet, viewport: vp, mainWidth: size.w, width: size.w, height: MINIMAP_H, dpr });
+      if (mctx) drawMinimap(mctx, { profile, sheet, viewport: vp, mainWidth: size.w, width: size.w, height: MINIMAP_H, dpr, playhead });
     });
     return () => cancelAnimationFrame(id);
-  }, [profile, sheet, selection, hover, vp, size, rowColors, ghost, selectedBar]);
+  }, [profile, sheet, selection, hover, vp, size, rowColors, ghost, selectedBar, icons, playhead, cue, bandEnabled]);
+
+  // Follow: keep the playhead column in view (scrolls only when it leaves the screen).
+  useEffect(() => {
+    if (!follow || playhead == null) return;
+    updateVp((v) => scrollToCol(v, playhead, latest.current.size.w));
+  }, [follow, playhead, updateVp]);
 
   // Wheel: scroll, or zoom with Ctrl/Cmd. Needs a non-passive listener to preventDefault.
   useEffect(() => {
@@ -216,6 +238,12 @@ export function StripView({ profile, sheet, selection, cursor, rowColors, ghost,
     return { x: e.clientX - (r?.left ?? 0), y: e.clientY - (r?.top ?? 0) };
   };
 
+  /** The column under a canvas x, clamped into the sheet. */
+  const bandCol = (x: number) => {
+    const l = latest.current;
+    return Math.min(l.sheet.cols - 1, Math.max(0, Math.floor(l.vp.scrollCol + (x - GUTTER_W) / l.vp.cellSize)));
+  };
+
   const emit = (type: CellPointerEvent['type'], e: ReactPointerEvent, pos: CellPos | null) => {
     latest.current.onCellPointer?.({
       type,
@@ -239,6 +267,16 @@ export function StripView({ profile, sheet, selection, cursor, rowColors, ghost,
       return;
     }
     const p = local(e);
+    const band = bandTop(latest.current.sheet.rows, latest.current.vp.cellSize, latest.current.size.h);
+    if (e.button === 0 && p.x >= GUTTER_W && p.y >= band && p.y < band + BAND_H) {
+      // The band under the grid sets where playback starts (T26); it does nothing while playing.
+      if (latest.current.bandEnabled) {
+        e.currentTarget.setPointerCapture(e.pointerId);
+        drag.current = { kind: 'band', pointerId: e.pointerId };
+        latest.current.onCue?.(bandCol(p.x), false);
+      }
+      return;
+    }
     if (e.button === 0 && p.y >= HEADER_H - SIG_ROW_H && p.y < HEADER_H && p.x >= GUTTER_W) {
       // A click on a measure number picks that bar for a time signature change; elsewhere on the row it clears the pick.
       const l = latest.current;
@@ -254,13 +292,17 @@ export function StripView({ profile, sheet, selection, cursor, rowColors, ghost,
     }
     e.currentTarget.setPointerCapture(e.pointerId);
     drag.current = { kind: 'cells', pointerId: e.pointerId };
-    emit('down', e, cellAtClamped(latest.current.vp, p.x, p.y, latest.current.sheet));
+    emit('down', e, cellAt(latest.current.vp, p.x, p.y, latest.current.sheet)); // outside the grid: no edit (T27)
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     const d = drag.current;
     const p = local(e);
     const l = latest.current;
+    if (d?.kind === 'band') {
+      l.onCue?.(bandCol(p.x), false);
+      return;
+    }
     if (d?.kind === 'pan') {
       const startScroll = d.startScroll;
       const startX = d.startX;
@@ -279,6 +321,10 @@ export function StripView({ profile, sheet, selection, cursor, rowColors, ghost,
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
     if (d.kind === 'pan') {
       setPanning(false);
+      return;
+    }
+    if (d.kind === 'band') {
+      latest.current.onCue?.(bandCol(local(e).x), true);
       return;
     }
     const p = local(e);

@@ -15,7 +15,7 @@ const store = (cols = 12) => createEditorStore(profile, cols);
 describe('editor store', () => {
   it('starts empty with the first palette entry selected', () => {
     const st = store().getState();
-    expect(st.sheet).toEqual({ rows: 14, cols: 12, cells: {}, timeSignatures: [{ col: 0, n: 4, m: 4 }] });
+    expect(st.sheet).toEqual({ rows: 14, cols: 12, cells: {}, timeSignatures: [{ col: 0, n: 4, m: 4 }], worldBpm: profile.timing.bpmDefault });
     expect(st.paletteId).toBe(palette[0]?.id);
     expect(st.selection).toBeNull();
     expect(st.canUndo()).toBe(false);
@@ -304,5 +304,32 @@ describe('setColumns', () => {
     expect(st().sheet.timeSignatures).toHaveLength(2);
     st().setTimeSignature(5, 2, 4); // not a measure bar: nothing changes
     expect(st().undoDepth).toBe(2);
+  });
+
+  it('a world BPM change is one undo step; an unchanged or invalid value adds none', () => {
+    const store = createEditorStore(profile, 16);
+    const st = () => store.getState();
+    st().setWorldBpm(140);
+    expect(st().sheet.worldBpm).toBe(140);
+    expect(st().undoDepth).toBe(1);
+    st().setWorldBpm(140);
+    st().setWorldBpm(Number.NaN);
+    expect(st().undoDepth).toBe(1);
+    st().undo();
+    expect(st().sheet.worldBpm).toBe(profile.timing.bpmDefault);
+    st().redo();
+    expect(st().sheet.worldBpm).toBe(140);
+  });
+
+  it('the world BPM is rounded to an integer and kept inside the profile range', () => {
+    const store = createEditorStore(profile, 16);
+    const st = () => store.getState();
+    st().setWorldBpm(120.6);
+    expect(st().sheet.worldBpm).toBe(121);
+    st().setWorldBpm(profile.timing.bpmMax + 50);
+    expect(st().sheet.worldBpm).toBe(profile.timing.bpmMax);
+    expect(st().lastReport[0]).toContain(String(profile.timing.bpmMax));
+    st().setWorldBpm(1);
+    expect(st().sheet.worldBpm).toBe(profile.timing.bpmMin);
   });
 });

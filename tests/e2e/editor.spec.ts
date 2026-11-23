@@ -19,6 +19,8 @@ interface Hooks {
 }
 
 test.beforeEach(async ({ page }) => {
+  // The first-run screen (M1b) is covered in firstrun.spec.ts; these tests start in the editor.
+  await page.addInitScript(() => localStorage.setItem('mts.firstRunDone', 'yes'));
   await page.goto('./');
   await page.getByTestId('strip-canvas').waitFor();
   await page.waitForFunction(() => (globalThis as unknown as Hooks).__mtsTest !== undefined && (globalThis as unknown as Hooks).__mtsView !== undefined);
@@ -482,4 +484,29 @@ test('T19: time signature select changes the bars; a measure number can be picke
   await page.mouse.click(box!.x + 400, box!.y + 36 + 8, { button: 'left' });
   await page.getByTestId('undo').click();
   await expect(page.getByTestId('undo')).toBeEnabled();
+});
+
+test('T25: painting the same note over a note with an Audio Rack erases the note and keeps the Rack', async ({ page }) => {
+  await click(page, 5, 5);
+  await page.getByTestId(`palette-${profile.gear.defaultType}`).click();
+  await click(page, 5, 5);
+  expect((await cell(page, 5, 5))?.gear).toBeDefined();
+  await page.getByTestId(`palette-${firstInstrument}:natural`).click();
+  await click(page, 5, 5);
+  const c = await cell(page, 5, 5);
+  expect(c?.block).toBeUndefined();
+  expect(c?.gear).toBeDefined();
+});
+
+test('T27: clicking outside the grid does nothing', async ({ page }) => {
+  const p = await point(page, 0, 5);
+  const box = (await page.getByTestId('strip-canvas').boundingBox())!;
+  await page.mouse.click(box.x + 6, p.y); // in the row gutter, left of column 0
+  expect(await cellCount(page)).toBe(0);
+});
+
+test('T28: every note a paint drag places is previewed', async ({ page }) => {
+  await drag(page, [1, 4], [6, 4]);
+  const n = await page.evaluate(() => (globalThis as unknown as { __mtsTest: { getAuditions(): unknown[] } }).__mtsTest.getAuditions().length);
+  expect(n).toBe(6);
 });

@@ -61,6 +61,8 @@ export const gameProfileSchema = z.strictObject({
     bpmMin: z.int().positive(),
     bpmMax: z.int().positive(),
     bpmInteger: z.boolean(),
+    /** World BPM for a new sheet (an app default; GMSF benchmarks use 75-100). */
+    bpmDefault: z.int().positive(),
   }),
   playback: z.strictObject({
     windowBlocks: z.array(z.enum(['note', 'blank', 'repeatBegin', 'repeatEnd', 'gear', 'rack'])),
@@ -68,12 +70,23 @@ export const gameProfileSchema = z.strictObject({
     foregroundMutes: z.boolean(),
     polyphonyCap: z.int().positive().nullable(),
   }),
+  /**
+   * How Repeat Begin/End blocks play (Design 2.5), measured in-game on 2026-11-23 (Sheet Music - Repeat Mechanics,
+   * scenarios 1-21). All Ends are armed at the start of a pass. The playhead remembers, per row, the last Begin it
+   * flowed through. An End jumps to that Begin, or to the song start when there is none or it lies to the End's right.
+   * Several Ends in a column: one per visit, topmost row first. A jump to column T arms the other Ends whose own
+   * nearest Begin lies after T; flowing through a Begin arms the Ends on its row to its left. Running off the end
+   * of the song resets all of it; a jump to the start carries the state into the next pass.
+   */
   repeats: z.strictObject({
-    match: z.literal('sameNote'),
-    scope: z.literal('anyEarlier'),
+    target: z.literal('lastBeginFlowedThroughOnRow'),
     noBegin: z.literal('songStart'),
-    oncePerLoop: z.boolean(),
-    rearmInner: z.boolean(),
+    endsPerVisit: z.literal(1),
+    endOrder: z.literal('topmostFirst'),
+    rearmOnJump: z.literal('endsWithBeginAfterTarget'),
+    rearmOnBeginPass: z.literal('endsLeftOfBeginOnRow'),
+    passEnd: z.literal('resetAll'),
+    verified: z.string(),
   }),
   gear: z.strictObject({
     maxNotes: z.int().positive(),
@@ -94,6 +107,30 @@ export const gameProfileSchema = z.strictObject({
   naturalFiles: z.strictObject(
     Object.fromEntries(NATURAL_LETTERS.map((l) => [l, fileIndex])) as Record<NaturalLetter, typeof fileIndex>,
   ),
+  /** The player's sound folder: files are <prefix><separator><index>.<extension>, prefix = instrument id unless overridden (Design 12.1). */
+  sounds: z.strictObject({
+    extension: z.string().min(1),
+    separator: z.string(),
+    prefixOverrides: z.record(z.string(), z.string().min(1)),
+  }),
+  /**
+   * Keywords for matching the player's block-image files to block kinds (Design 12.5). Matching is
+   * case-insensitive on the file name: every allOf word, at least one anyOf word (if given), no noneOf word.
+   * Block kinds are instrument ids plus blank, repeatBegin, repeatEnd and gear. An image with an accidentals
+   * word is that variant; one without is the natural.
+   */
+  blockImages: z.strictObject({
+    extension: z.string().min(1),
+    accidentals: z.strictObject({ sharp: z.array(z.string().min(1)), flat: z.array(z.string().min(1)) }),
+    blocks: z.record(
+      z.string(),
+      z.strictObject({
+        allOf: z.array(z.string().min(1)).optional(),
+        anyOf: z.array(z.string().min(1)).optional(),
+        noneOf: z.array(z.string().min(1)).optional(),
+      }),
+    ),
+  }),
   instruments: z.record(z.string().regex(/^[a-z_]+$/), instrumentSchema),
 });
 

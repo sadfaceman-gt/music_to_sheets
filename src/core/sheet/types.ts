@@ -64,6 +64,8 @@ export interface Sheet {
   cells: Record<string, Cell>;
   /** Time signature changes, sorted by column; the first is at column 0. */
   timeSignatures: TimeSignatureChange[];
+  /** World BPM set on the World Lock (integer, profile.timing.bpmMin..bpmMax); GMSF stores it. */
+  worldBpm: number;
 }
 
 export interface CellPos {
