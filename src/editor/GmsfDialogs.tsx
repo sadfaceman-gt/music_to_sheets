@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import type { GameProfile } from '../core/profile/schema.ts';
 import type { GmsfIssue, GmsfReadResult, GmsfWriteResult, WorldSupport } from '../core/gmsf/types.ts';
-import { cellLabel, groupIssues, importSummary, worldWarnings } from './gmsfFile.ts';
+import { cellLabel, groupIssues, importSummary, issueLabel, worldWarnings } from './gmsfFile.ts';
 
 const btn = 'rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700';
 const btnPrimary = 'rounded bg-sky-600 px-3 py-1 text-sm font-semibold text-white hover:bg-sky-500';
@@ -68,7 +68,7 @@ export function ImportReport({ profile, fileName, result, support, onClose }: { 
         {groups.map((g) => (
           <section key={`${g.severity}:${g.code}`} className="mb-2" data-testid={`import-group-${g.code}`}>
             <h3 className={g.severity === 'skipped' ? 'font-semibold text-amber-300' : 'font-semibold text-slate-300'}>
-              {g.severity === 'skipped' ? 'Skipped' : 'Warning'}: {g.count} × {g.code}
+              {g.severity === 'skipped' ? 'Skipped' : 'Warning'}: {g.count} × {issueLabel(g.code)}
             </h3>
             <ul className="list-disc pl-5 text-slate-300">
               {g.messages.map((m, n) => (

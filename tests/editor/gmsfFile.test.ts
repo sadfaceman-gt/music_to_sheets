@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import profileJson from '../../public/profiles/growtopia-default.json';
 import type { GmsfIssue } from '../../src/core/gmsf/types';
 import { parseGameProfile } from '../../src/core/profile/schema';
-import { cellLabel, groupIssues, songNameOf, worldWarnings } from '../../src/editor/gmsfFile';
+import { cellLabel, groupIssues, issueLabel, songNameOf, worldWarnings } from '../../src/editor/gmsfFile';
 
 const profile = parseGameProfile(profileJson);
 
@@ -38,5 +38,12 @@ describe('gmsfFile helpers', () => {
     expect(worldWarnings(profile, { ...base, overflowBy: 21 })).toEqual([`Runs past the world's ${profile.grid.worldCols} columns by 21`]);
     expect(worldWarnings(profile, { ...base, bedrockCells: [{ col: 1, row: 12 }, { col: 2, row: 13 }] })).toEqual(['2 blocks on bedrock']);
     expect(worldWarnings(profile, { ...base, supported: true })).toEqual([]);
+  });
+});
+
+describe('issueLabel', () => {
+  it('gives a plain heading for every issue code', () => {
+    expect(issueLabel('unknownBlockId')).toBe('Unknown block IDs');
+    expect(issueLabel('rackSlotGap')).toMatch(/empty slots/);
   });
 });

@@ -1,6 +1,6 @@
 /** Helpers for the Open / Save GMSF flows: file names, user text for cells and issues, the download. No React. */
 import type { GameProfile } from '../core/profile/schema.ts';
-import type { GmsfIssue, GmsfIssueSeverity, GmsfStats, WorldSupport } from '../core/gmsf/types.ts';
+import type { GmsfIssue, GmsfIssueCode, GmsfIssueSeverity, GmsfStats, WorldSupport } from '../core/gmsf/types.ts';
 import { rowLetters } from '../core/sheet/rows.ts';
 import type { CellPos } from '../core/sheet/types.ts';
 
@@ -15,9 +15,32 @@ export function cellLabel(profile: GameProfile, pos: CellPos): string {
   return `Column ${pos.col + 1}, ${rowLetters(profile)[pos.row] ?? `row ${pos.row + 1}`}`;
 }
 
+/** Plain headings for the import report, one per issue code. */
+const ISSUE_LABELS: Record<GmsfIssueCode, string> = {
+  badMagic: 'Not a GMSF file',
+  truncated: 'File cut short',
+  badRowCount: 'Wrong row count',
+  unknownVersion: 'Unknown version bytes',
+  bpmOutOfRange: 'BPM out of range',
+  unknownBlockId: 'Unknown block IDs',
+  unknownRackNoteId: 'Unknown notes in Racks',
+  rackNoteNoCode: 'Rack notes with no Gear code',
+  badRackSlot: 'Damaged Rack slots',
+  rackSlotGap: 'Racks with empty slots between notes',
+  rackVolumeOutOfRange: 'Rack volume out of range',
+  emptyRack: 'Racks with no notes',
+  missingTrailer: 'Missing end marker',
+  badTrailer: 'Unexpected end marker',
+  extraData: 'Extra data after the end marker',
+};
+
+export function issueLabel(code: GmsfIssueCode): string {
+  return ISSUE_LABELS[code];
+}
+
 export interface IssueGroup {
   severity: Exclude<GmsfIssueSeverity, 'fatal'>;
-  code: string;
+  code: GmsfIssueCode;
   count: number;
   messages: string[];
 }
