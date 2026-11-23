@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { GameProfile } from '../core/profile/schema.ts';
 import { humaniseKey } from '../core/sheet/palette.ts';
 import { keyOf, toolBindingId } from './shortcuts.ts';
@@ -36,6 +36,8 @@ export interface ToolbarProps {
   onTranspose: (semitones: number) => void;
   onSwapInstrument: (instrument: string) => void;
   onVolume: (volume: number) => void;
+  onOpenFile: (file: File) => void;
+  onSaveGmsf: () => void;
 }
 
 export function Toolbar(p: ToolbarProps) {
@@ -43,6 +45,7 @@ export function Toolbar(p: ToolbarProps) {
   const [vol, setVol] = useState(String(volume.max));
   const [inst, setInst] = useState(Object.keys(p.profile.instruments)[0] ?? '');
   const volNumber = Number(vol);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   return (
     <div role="toolbar" aria-label="Tools" className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-800 bg-slate-900 px-3 py-2">
@@ -149,6 +152,24 @@ export function Toolbar(p: ToolbarProps) {
       </div>
 
       <div className="ml-auto flex items-center gap-1">
+        <input
+          ref={fileInput}
+          type="file"
+          accept=".gmsf,.GMSF"
+          hidden
+          data-testid="open-gmsf-input"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = '';
+            if (file) p.onOpenFile(file);
+          }}
+        />
+        <button type="button" data-testid="open-gmsf" title="Open a GMSF file (or drop one on the grid)" onClick={() => fileInput.current?.click()} className={btn}>
+          Open GMSF
+        </button>
+        <button type="button" data-testid="save-gmsf" title="Save the sheet as a GMSF file" onClick={p.onSaveGmsf} className={`${btn} mr-2`}>
+          Save as GMSF
+        </button>
         <label className="mr-2 flex items-center gap-1 text-sm text-slate-400" title="One-key shortcuts for tools and blocks (Ctrl combos always work)">
           <input type="checkbox" data-testid="shortcuts-toggle" checked={p.shortcutsEnabled} onChange={p.onToggleShortcuts} />
           Shortcuts
