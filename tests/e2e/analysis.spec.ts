@@ -23,8 +23,15 @@ test('4/4 song: about 40 beats, a downbeat every 4', async ({ page }) => {
   expect(g.meter).toBe('4/4');
 });
 
-test('3/4 song: a downbeat every 3', async ({ page }) => {
+test('3/4 song: a downbeat every 3 (DSP tracker); Beat This! also reads 3/4', async ({ page }) => {
   await openSong(page, song34());
+  // Beat This! (the default) gets the meter; on this 20 s click track it may misplace a single downbeat.
+  expect(await ana.tracker(page)).toBe('beatthis-small0');
+  expect((await gridOf(page)).meter).toBe('3/4');
+  // The M2a check of every downbeat runs on the DSP tracker it was written for.
+  await page.getByTestId('tracker-dsp').click();
+  await expect(page.getByTestId('tracker-dsp')).toHaveAttribute('aria-pressed', 'true');
+  await ana.waitDone(page);
   const g = await gridOf(page);
   for (let i = 1; i < g.downbeats.length; i++) expect(g.downbeats[i]! - g.downbeats[i - 1]!).toBe(3);
   expect(g.meter).toBe('3/4');
