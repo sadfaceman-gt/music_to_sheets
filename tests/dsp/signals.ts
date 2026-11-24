@@ -6,6 +6,8 @@ export interface TrackOptions {
   segments: { bpm: number; beats: number }[];
   beatsPerBar: number;
   chords?: boolean;
+  /** Bars [from, to) whose chord changes on beat 3 instead of beat 1. */
+  offBeatChordBars?: [number, number];
   /** Seconds of silence before the first beat. */
   lead?: number;
 }
@@ -66,8 +68,12 @@ export function makeTrack(opts: TrackOptions): Track {
   if (opts.chords) {
     const bars = downbeats.length;
     for (let b = 0; b < bars; b++) {
-      const from = Math.round(downbeats[b]! * SR);
-      const to = b + 1 < bars ? Math.round(downbeats[b + 1]! * SR) : total;
+      const half = (i: number): number => {
+        const r = opts.offBeatChordBars;
+        return r && i >= r[0] && i < r[1] && i + 1 < bars ? (downbeats[i + 1]! - downbeats[i]!) / 2 : 0;
+      };
+      const from = Math.round((downbeats[b]! + half(b)) * SR);
+      const to = b + 1 < bars ? Math.round((downbeats[b + 1]! + half(b + 1)) * SR) : total;
       const chord = CHORDS[b % CHORDS.length]!;
       for (let k = from; k < to && k < total; k++) {
         let v = 0;

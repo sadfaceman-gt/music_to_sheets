@@ -8,7 +8,8 @@ import type { BeatGrid, MeterSpan, TimeSignature } from '../core/analysis/types.
 const ONSET_WEIGHT = 0.15; // facts-ok: weight of onset strength in the downbeat novelty
 const WINDOW_BARS = 16; // facts-ok: bars per meter-change window
 const MIN_SPAN_BARS = 8; // facts-ok: bars a new meter must win
-const CHANGE_MARGIN = 1.5; // facts-ok: contrast ratio a different meter needs to beat the current one
+const CHANGE_MARGIN = 2; // facts-ok: contrast ratio a different meter needs to beat the current one
+const MIN_WINDOWS = 4; // facts-ok: consecutive windows a different meter must win
 const FAST_BEAT_BPM = 150; // facts-ok: above this a 3-beat bar is read as 6/8 in eighths
 
 /** Per-beat novelty: 1 - cosine(chroma of this beat, previous beat) plus a little normalised onset strength. */
@@ -116,15 +117,29 @@ export function detectDownbeats(nov: Float64Array, beatBpm: number): Pick<BeatGr
   const step = MIN_SPAN_BARS * globalBpb;
   const labelOf = new Int8Array(n).fill(globalBpb);
   if (n >= win + step) {
+    const alt = globalBpb === 4 ? 3 : 4;
+    const wins: { from: number; wins: boolean }[] = [];
     for (let from = 0; from + win <= n; from += step) {
       const to = from + win;
-      const alt = globalBpb === 4 ? 3 : 4;
       const cur = bestPhase(nov, from, to, globalBpb);
       const other = bestPhase(nov, from, to, alt);
-      if (other.contrast > CHANGE_MARGIN * Math.max(cur.contrast, 0.2) && other.contrast > 0.5) { // facts-ok: contrast floors
-        const a = from + (win - step) / 2;
-        for (let i = a; i < a + step && i < n; i++) labelOf[i] = alt;
+      wins.push({ from, wins: other.contrast > CHANGE_MARGIN * Math.max(cur.contrast, 0.2) && other.contrast > 0.5 }); // facts-ok: contrast floors
+    }
+    // A change needs strong evidence: the other meter wins in at least MIN_WINDOWS consecutive windows.
+    const pad = (win - step) / 2;
+    for (let k = 0; k < wins.length; ) {
+      if (!wins[k]!.wins) {
+        k++;
+        continue;
       }
+      let e = k;
+      while (e + 1 < wins.length && wins[e + 1]!.wins) e++;
+      if (e - k + 1 >= MIN_WINDOWS) {
+        const a = wins[k]!.from + pad;
+        const b = wins[e]!.from + win - pad;
+        for (let i = a; i < b && i < n; i++) labelOf[i] = alt;
+      }
+      k = e + 1;
     }
   }
 

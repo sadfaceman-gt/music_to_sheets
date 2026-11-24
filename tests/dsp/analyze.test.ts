@@ -35,6 +35,13 @@ describe('analyzeBeats on generated click tracks', () => {
     expect(r.driftPercent).toBeGreaterThan(3);
   });
 
+  it('keeps one 4/4 span when a few bars change chord on beat 3', () => {
+    const t = makeTrack({ segments: [{ bpm: 110, beats: 4 * 40 }], beatsPerBar: 4, chords: true, offBeatChordBars: [14, 20] });
+    const r = run(t.samples);
+    expect(r.grid.meter).toHaveLength(1);
+    expect(r.grid.meter[0]!.beatsPerBar).toBe(4);
+  });
+
   it('is deterministic', () => {
     const t = steady(120, 12, 4);
     expect(JSON.stringify(run(t.samples))).toBe(JSON.stringify(run(t.samples)));

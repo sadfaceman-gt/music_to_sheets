@@ -22,6 +22,8 @@ const LOCAL_RANGE = 1.5; // facts-ok: local tempo may differ from the global one
 
 const LOCAL_DEADBAND = 0.08; // facts-ok: ratio
 
+const SUSTAIN_BEATS = 32; // facts-ok: beats (8 bars of 4) a local tempo must hold to count as a tempo change
+
 function median(xs: number[]): number {
   const s = [...xs].sort((a, b) => a - b);
   const m = s.length >> 1;
@@ -53,6 +55,19 @@ function localPeriods(onset: Float32Array, globalPeriod: number, frameRate: numb
     const m = median(periods.slice(Math.max(0, i - 2), i + 3));
     return Math.abs(m / globalPeriod - 1) < LOCAL_DEADBAND ? globalPeriod : m;
   });
+  // A local period off the global one counts only as a tempo change when it is sustained (similar estimates over at
+  // least SUSTAIN_BEATS beats of windows); shorter stretches are level jumps or noise and stay on the global period.
+  for (let i = 0; i < sm.length; ) {
+    if (sm[i] === globalPeriod) {
+      i++;
+      continue;
+    }
+    let e = i;
+    while (e + 1 < sm.length && sm[e + 1] !== globalPeriod && Math.abs(sm[e + 1]! / sm[i]! - 1) < LOCAL_DEADBAND) e++;
+    const span = (e - i) * hopW + TEMPOGRAM_WINDOW;
+    if (span < SUSTAIN_BEATS * globalPeriod) for (let k = i; k <= e; k++) sm[k] = globalPeriod;
+    i = e + 1;
+  }
   let w = 0;
   for (let i = 0; i < n; i++) {
     while (w + 1 < centres.length && centres[w + 1]! <= i) w++;
