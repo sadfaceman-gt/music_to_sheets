@@ -103,3 +103,19 @@ export async function bandPoint(page: Page, col: number) {
   const { cellSize } = await page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsView!.getViewport());
   return { x: p.x, y: p.y + cellSize / 2 + 7 };
 }
+
+const A = () => (globalThis as unknown as MtsHooks).__mtsAnalysis!;
+/** Reads of the Import and analysis screen's test hook. */
+export const ana = {
+  grid: (page: Page) => page.evaluate(() => A().getGrid()),
+  tempo: (page: Page) => page.evaluate(() => A().getTempo()),
+  corrections: (page: Page) => page.evaluate(() => A().getCorrections()),
+  playback: (page: Page) => page.evaluate(() => A().getPlayback()),
+  state: (page: Page) => page.evaluate(() => A().getAnalysisState()),
+  projectId: (page: Page) => page.evaluate(() => A().getProjectId()),
+  view: (page: Page) => page.evaluate(() => A().getView()),
+  /** Waits until the analysis is done (the import and the DSP run in the page). */
+  async waitDone(page: Page) {
+    await page.waitForFunction(() => (globalThis as unknown as MtsHooks).__mtsAnalysis?.getAnalysisState() === 'done', undefined, { timeout: 90_000 });
+  },
+};
