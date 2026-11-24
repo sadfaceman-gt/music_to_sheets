@@ -26,10 +26,18 @@ export interface StorageUsage {
   persisted: boolean | null;
 }
 
+/** What importFile does when a project for the same file (same SHA-256) already exists. */
+export type DuplicateMode = 'open' | 'ask' | 'new';
+
 export interface ImportOutcome {
+  /** The project to open. With `needsChoice` it is only the most recently opened match: nothing was created. */
   project: Project;
-  /** True when a project for the same file (same SHA-256) already existed and was returned instead. */
+  /** True when a project for the same file (same SHA-256) already existed. */
   existing: boolean;
+  /** Every project that already holds this file, most recently opened first (empty for a new file). */
+  matches: Project[];
+  /** True in 'ask' mode when matches exist: the caller must ask the user, then import again with 'open' or 'new'. */
+  needsChoice: boolean;
 }
 
 export interface ProjectStore {
@@ -37,12 +45,14 @@ export interface ProjectStore {
   list(): Promise<Project[]>;
   get(id: string): Promise<Project | null>;
   /**
-   * Imports one file: checks the type (ImportError 'unsupported-type'), hashes it, returns the existing project for
-   * the same SHA-256 if there is one, else decodes (decodeSong), writes the original, the 44.1 kHz stereo WAV and the
+   * Imports one file: checks the type (ImportError 'unsupported-type'), hashes it, then handles an existing project
+   * for the same SHA-256 by `duplicate`: 'open' (default) returns the most recently opened one, 'ask' returns it with
+   * needsChoice and creates nothing, 'new' creates another project that shares the stored source and peaks without
+   * decoding again. Otherwise it decodes (decodeSong), writes the original, the 44.1 kHz stereo WAV and the
    * 22.05 kHz mono copy to OPFS, computes and stores the peaks, creates the project (analysisKey null) and, on the
    * first project, calls navigator.storage.persist(). On any failure nothing is left behind.
    */
-  importFile(file: File, onProgress?: ProgressCallback): Promise<ImportOutcome>;
+  importFile(file: File, onProgress?: ProgressCallback, duplicate?: DuplicateMode): Promise<ImportOutcome>;
   /** Validates and writes the project (meta.updatedAt is set here). */
   save(project: Project): Promise<void>;
   /** Marks the project opened now (meta.lastOpenedAt) and returns it. */
@@ -130,20 +140,39 @@ export function createProjectStore(overrides?: Partial<StoreDeps>): ProjectStore
       return row ? parseRow(row) : null;
     },
 
-    async importFile(file, onProgress) {
+    async importFile(file, onProgress, duplicate = 'open') {
       const report = (stage: 'decode' | 'done', fraction: number): void => onProgress?.({ stage, fraction, etaSeconds: null });
       const ext = importExtension(file.name);
       if (!ext) throw new ImportError('unsupported-type', `${file.name} isn't a supported audio file. Use MP3, WAV, FLAC, OGG or M4A.`);
       const bytes = await file.arrayBuffer();
       const sha = await sha256Hex(bytes);
       report('decode', 0.1);
-      const existingRow = await db.projects.where('source.sha256').equals(sha).first();
-      if (existingRow) {
-        const project = parseRow(existingRow);
-        if (project) {
+      const matches: Project[] = [];
+      for (const row of await db.projects.where('source.sha256').equals(sha).toArray()) {
+        const m = parseRow(row);
+        if (m) matches.push(m);
+      }
+      matches.sort((a, b) => b.meta.lastOpenedAt - a.meta.lastOpenedAt);
+      const first = matches[0];
+      if (first) {
+        if (duplicate === 'new') {
+          const now = d.now();
+          const copy = parseProject({
+            schemaVersion: 1,
+            id: d.uuid(),
+            meta: { name: `${file.name.replace(/\.[^.]+$/, '')} (${matches.length + 1})`, createdAt: now, updatedAt: now, lastOpenedAt: now },
+            source: first.source,
+            peaksKey: first.peaksKey,
+            analysisKey: null,
+            tempoBpm: null,
+            corrections: [],
+          });
+          await db.projects.put({ ...copy });
           report('done', 1);
-          return { project, existing: true };
+          return { project: copy, existing: true, matches, needsChoice: false };
         }
+        report('done', 1);
+        return { project: first, existing: true, matches, needsChoice: duplicate === 'ask' };
       }
       const isFirst = (await db.projects.count()) === 0;
       const decoded = await d.decode(bytes);
@@ -193,7 +222,7 @@ export function createProjectStore(overrides?: Partial<StoreDeps>): ProjectStore
         });
         if (isFirst) d.persist();
         report('done', 1);
-        return { project: valid, existing: false };
+        return { project: valid, existing: false, matches: [], needsChoice: false };
       } catch (e) {
         for (const name of written) await d.opfs.deleteFile(SOURCES_FOLDER, name).catch(() => undefined);
         throw e;

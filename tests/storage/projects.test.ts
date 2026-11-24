@@ -123,6 +123,34 @@ describe('importFile', () => {
     expect(persist).toHaveBeenCalledTimes(1);
   });
 
+  it("'ask' creates nothing and reports every match; 'new' adds a project that shares the source without decoding", async () => {
+    const decode = vi.fn(async () => fakeDecoded());
+    const { store, o } = setup({ decode });
+    const first = (await store.importFile(song('a.mp3', 'same'))).project;
+    const files = o.files.size;
+    const asked = await store.importFile(song('a.mp3', 'same'), undefined, 'ask');
+    expect(asked).toMatchObject({ existing: true, needsChoice: true });
+    expect(asked.matches.map((m) => m.id)).toEqual([first.id]);
+    expect((await store.list()).length).toBe(1);
+
+    const second = await store.importFile(song('a.mp3', 'same'), undefined, 'new');
+    expect(second.needsChoice).toBe(false);
+    expect(second.project.id).not.toBe(first.id);
+    expect(second.project.meta.name).toBe('a (2)');
+    expect(second.project.source).toEqual(first.source);
+    expect(second.project.analysisKey).toBeNull();
+    expect(decode).toHaveBeenCalledTimes(1);
+    expect(o.files.size).toBe(files);
+    expect((await store.list()).length).toBe(2);
+
+    const third = await store.importFile(song('a.mp3', 'same'), undefined, 'ask');
+    expect(third.matches).toHaveLength(2);
+    expect((await store.importFile(song('a.mp3', 'same'), undefined, 'new')).project.meta.name).toBe('a (3)');
+    await store.delete(first.id);
+    expect(await store.getPeaks(second.project)).not.toBeNull();
+    expect(o.files.size).toBe(files);
+  });
+
   it('rejects unsupported types before reading', async () => {
     const { store } = setup();
     await expect(store.importFile(song('notes.txt', 'x'))).rejects.toMatchObject({ reason: 'unsupported-type', message: "notes.txt isn't a supported audio file. Use MP3, WAV, FLAC, OGG or M4A." });

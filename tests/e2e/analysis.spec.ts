@@ -112,6 +112,18 @@ test('plays the song with a click track', async ({ page }) => {
   expect((await ana.playback(page)).playing).toBe(false);
 });
 
+test('column clicks add fainter clicks between the beats', async ({ page }) => {
+  await openSong(page, song44());
+  await page.getByTestId('columns-per-beat').selectOption('2');
+  await page.getByTestId('column-click-toggle').check();
+  await page.getByTestId('play-song').click();
+  await page.waitForTimeout(2000);
+  const a = await ana.playback(page);
+  expect(a.subClicks).toBeGreaterThan(0);
+  expect(a.subClicks).toBeGreaterThanOrEqual(a.clicksScheduled - 2);
+  await page.getByTestId('stop-song').click();
+});
+
 test('zoom in and out change the view', async ({ page }) => {
   await openSong(page, song44());
   const v0 = await ana.view(page);

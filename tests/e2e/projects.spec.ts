@@ -36,13 +36,39 @@ test('import, list, reload, duplicate, delete', async ({ page }) => {
   await ana.waitDone(page);
   expect(await ana.grid(page)).toEqual(grid);
 
-  // The same file again opens the same project.
+  // The same file again asks: the cross cancels, Load saved project opens the same project.
   await page.getByTestId('step-projects').click();
   await page.getByTestId('import-input').setInputFiles(song44());
+  await expect(page.getByTestId('duplicate-dialog')).toBeVisible();
+  await page.getByTestId('duplicate-cancel').click();
+  await expect(page.getByTestId('duplicate-dialog')).toHaveCount(0);
+  await expect(page.getByTestId('project-row')).toHaveCount(1);
+  await page.getByTestId('import-input').setInputFiles(song44());
+  await page.getByTestId('duplicate-backdrop').click({ position: { x: 5, y: 5 } });
+  await expect(page.getByTestId('duplicate-dialog')).toHaveCount(0);
+  await page.getByTestId('import-input').setInputFiles(song44());
+  await page.getByTestId('duplicate-load').click();
   await page.getByTestId('analysis-screen').waitFor();
   await expect(page.getByTestId('import-notice')).toBeVisible();
   expect(await ana.projectId(page)).toBe(id);
+
+  // Create new project makes a second project; with two, Load saved project lists them.
   await page.getByTestId('step-projects').click();
+  await page.getByTestId('import-input').setInputFiles(song44());
+  await page.getByTestId('duplicate-new').click();
+  await page.getByTestId('analysis-screen').waitFor();
+  await ana.waitDone(page);
+  expect(await ana.projectId(page)).not.toBe(id);
+  await page.getByTestId('step-projects').click();
+  await expect(page.getByTestId('project-row')).toHaveCount(2);
+  await page.getByTestId('import-input').setInputFiles(song44());
+  await page.getByTestId('duplicate-load').click();
+  await expect(page.getByTestId('duplicate-pick')).toHaveCount(2);
+  await page.getByTestId('duplicate-pick').last().click();
+  await page.getByTestId('analysis-screen').waitFor();
+  await page.getByTestId('step-projects').click();
+  await page.getByTestId('delete-project').first().click();
+  await page.getByTestId('confirm-delete').click();
   await expect(page.getByTestId('project-row')).toHaveCount(1);
 
   await page.getByTestId('delete-project').click();

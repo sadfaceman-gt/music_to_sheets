@@ -77,6 +77,19 @@ describe('click window', () => {
     expect(clicksInWindow(grid, 1.9, 2.1)).toEqual([{ time: 2, downbeat: true }]);
     expect(clicksInWindow(grid, 99, 100)).toEqual([]);
   });
+
+  it('adds fainter column clicks between beats, including the stretch after the previous beat', () => {
+    const beatsOnly = clicksInWindow(grid, 0.5, 2.5);
+    const c = clicksInWindow(grid, 0.5, 1.5, 4);
+    expect(c.map((x) => x.time)).toEqual([0.5, 0.625, 0.75, 0.875, 1, 1.125, 1.25, 1.375]);
+    expect(c.filter((x) => x.sub).length).toBe(6);
+    expect(c.filter((x) => !x.sub).map((x) => x.time)).toEqual([0.5, 1]);
+    // A window that starts between beats still gets the subs that follow the earlier beat.
+    expect(clicksInWindow(grid, 0.6, 0.8, 2).map((x) => x.time)).toEqual([0.75]);
+    expect(clicksInWindow(grid, 0.6, 0.8, 4).map((x) => x.time)).toEqual([0.625, 0.75]);
+    expect(clicksInWindow(grid, 0.5, 2.5, 1)).toEqual(beatsOnly);
+    expect(clicksInWindow(grid, 0.5, 2.5, 3).filter((x) => x.sub)).toHaveLength(beatsOnly.length * 2);
+  });
 });
 
 describe('router', () => {

@@ -28,6 +28,8 @@ export function ProjectsScreen({ store, onOpen }: Props) {
   const [over, setOver] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  /** A file whose song is already in a project: waits for the user's choice (dialog). */
+  const [pending, setPending] = useState<{ file: File; matches: Project[]; picking: boolean } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const importing = progress !== null;
 
@@ -52,13 +54,36 @@ export function ProjectsScreen({ store, onOpen }: Props) {
     setNotice(files.length > 1 ? `You gave ${files.length} files; only the first one (${file.name}) is imported.` : null);
     setProgress({ stage: 'decode', fraction: 0, etaSeconds: null });
     try {
-      const { project, existing } = await store.importFile(file, setProgress);
-      onOpen(project.id, existing ? 'This song was already imported, so its project is open.' : undefined);
+      const { project, matches, needsChoice } = await store.importFile(file, setProgress, 'ask');
+      if (needsChoice) {
+        setPending({ file, matches, picking: false });
+        setProgress(null);
+        return;
+      }
+      onOpen(project.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setProgress(null);
       void refresh();
     }
+  };
+
+  const createNew = async (file: File) => {
+    setPending(null);
+    setProgress({ stage: 'decode', fraction: 0, etaSeconds: null });
+    try {
+      const { project } = await store.importFile(file, setProgress, 'new');
+      onOpen(project.id, 'A new project was created for this song.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setProgress(null);
+      void refresh();
+    }
+  };
+
+  const loadSaved = (id: string) => {
+    setPending(null);
+    onOpen(id, 'This song was already imported, so its saved project is open.');
   };
 
   const remove = async (id: string) => {
@@ -158,6 +183,59 @@ export function ProjectsScreen({ store, onOpen }: Props) {
           ))}
         </ul>
       </section>
+
+      {pending && (
+        <div
+          data-testid="duplicate-backdrop"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setPending(null)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setPending(null);
+          }}
+        >
+          <div role="dialog" aria-modal="true" aria-label="Song already imported" data-testid="duplicate-dialog" className="relative w-full max-w-md space-y-3 rounded-lg border border-slate-600 bg-slate-900 p-5" onClick={(e) => e.stopPropagation()}>
+            <button type="button" aria-label="Cancel" data-testid="duplicate-cancel" autoFocus onClick={() => setPending(null)} className="absolute right-2 top-2 rounded px-2 py-1 text-slate-400 hover:bg-slate-800">
+              ×
+            </button>
+            {pending.picking ? (
+              <>
+                <h3 className="pr-6 text-lg font-semibold">Choose a project</h3>
+                <ul className="space-y-2">
+                  {pending.matches.map((m) => (
+                    <li key={m.id}>
+                      <button type="button" data-testid="duplicate-pick" onClick={() => loadSaved(m.id)} className="flex w-full flex-wrap items-center gap-3 rounded border border-slate-700 bg-slate-800 p-2 text-left hover:bg-slate-700">
+                        <span className="min-w-0 flex-1 truncate font-medium">{m.meta.name}</span>
+                        <span className="text-sm text-slate-400">{formatBpm(m.tempoBpm)}</span>
+                        <span className="text-sm text-slate-500">{formatRelative(m.meta.lastOpenedAt)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <>
+                <h3 className="pr-6 text-lg font-semibold">This song is already imported</h3>
+                <p className="text-sm text-slate-300">
+                  {pending.matches.length === 1 ? 'A saved project holds' : `${pending.matches.length} saved projects hold`} “{pending.file.name}”. Load a saved project, or start a new project from the same song.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    data-testid="duplicate-load"
+                    onClick={() => (pending.matches.length === 1 ? loadSaved(pending.matches[0]!.id) : setPending({ ...pending, picking: true }))}
+                    className="rounded bg-sky-700 px-4 py-2 hover:bg-sky-600"
+                  >
+                    Load saved project
+                  </button>
+                  <button type="button" data-testid="duplicate-new" onClick={() => void createNew(pending.file)} className="rounded bg-slate-700 px-4 py-2 hover:bg-slate-600">
+                    Create new project
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       <p data-testid="storage-usage" className="text-xs text-slate-500">
         {usageText(usage)}

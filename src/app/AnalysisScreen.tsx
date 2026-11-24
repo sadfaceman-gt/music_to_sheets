@@ -61,6 +61,8 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
   const [tapCount, setTapCount] = useState(0);
   const [confirmRerun, setConfirmRerun] = useState(false);
   const [clicksOn, setClicksOn] = useState(true);
+  const [colClicks, setColClicks] = useState(false);
+  const [colsPerBeat, setColsPerBeat] = useState(4);
   const [clickVol, setClickVol] = useState(0.7); // facts-ok: default volume
   const [songVol, setSongVol] = useState(1);
 
@@ -316,7 +318,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
       },
       getTempo: () => (live.current.grid && live.current.grid.beats.length > 1 ? gridTempo(live.current.grid.beats) : null),
       getCorrections: () => live.current.cs.corrections,
-      getPlayback: () => player.current?.stats() ?? { playing: false, contextState: null, songTime: null, clicksScheduled: 0, downbeatClicks: 0 },
+      getPlayback: () => player.current?.stats() ?? { playing: false, contextState: null, songTime: null, clicksScheduled: 0, downbeatClicks: 0, subClicks: 0 },
       getAnalysisState: () => live.current.runState,
       getView: () => live.current.view,
     };
@@ -426,6 +428,37 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
                 }}
               />
               Click track
+            </label>
+            <label className="flex items-center gap-1 text-sm" title="Adds fainter clicks between the beats, one per column of the sheet">
+              <input
+                type="checkbox"
+                data-testid="column-click-toggle"
+                checked={colClicks}
+                onChange={(e) => {
+                  setColClicks(e.target.checked);
+                  getPlayer().setSubdivisions(e.target.checked ? colsPerBeat : 1);
+                }}
+              />
+              Column clicks
+            </label>
+            <label className="flex items-center gap-1 text-sm">
+              Columns per beat
+              <select
+                data-testid="columns-per-beat"
+                className="rounded bg-slate-800 px-1 py-0.5"
+                value={colsPerBeat}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  setColsPerBeat(n);
+                  getPlayer().setSubdivisions(colClicks ? n : 1);
+                }}
+              >
+                {[2, 3, 4].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="flex items-center gap-1 text-sm">
               Click volume

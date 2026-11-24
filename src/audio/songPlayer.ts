@@ -16,6 +16,7 @@ export interface PlaybackStats {
   songTime: number | null;
   clicksScheduled: number;
   downbeatClicks: number;
+  subClicks: number;
 }
 
 export class SongPlayer {
@@ -30,6 +31,8 @@ export class SongPlayer {
   private scheduledUntil = 0;
   private playing = false;
   private clicksOn = true;
+  private subdivisions = 1;
+  private subClicks = 0;
   private songVolume = 1;
   private clickVolume = 0.7; // facts-ok: default volume
   private clicksScheduled = 0;
@@ -72,6 +75,10 @@ export class SongPlayer {
     this.clickVolume = v;
     this.applyGains();
   }
+  /** Fainter clicks between beats: n - 1 extra per beat (1 = none). Takes effect from the next scheduling tick. */
+  setSubdivisions(n: number): void {
+    this.subdivisions = Math.max(1, Math.floor(n));
+  }
   setClicksOn(on: boolean): void {
     this.clicksOn = on;
     this.applyGains();
@@ -109,8 +116,12 @@ export class SongPlayer {
     const from = Math.max(this.scheduledUntil, now);
     const to = now + LOOKAHEAD_SEC;
     if (to <= from) return;
-    for (const click of clicksInWindow(this.getGrid(), from, to)) {
-      scheduleClick(ctx, this.clickGain, this.startCtx + (click.time - this.startSong), click.downbeat);
+    for (const click of clicksInWindow(this.getGrid(), from, to, this.subdivisions)) {
+      scheduleClick(ctx, this.clickGain, this.startCtx + (click.time - this.startSong), click.downbeat, click.sub === true);
+      if (click.sub) {
+        this.subClicks++;
+        continue;
+      }
       this.clicksScheduled++;
       if (click.downbeat) this.downbeatClicks++;
     }
@@ -162,6 +173,7 @@ export class SongPlayer {
       songTime: this.position(),
       clicksScheduled: this.clicksScheduled,
       downbeatClicks: this.downbeatClicks,
+      subClicks: this.subClicks,
     };
   }
 
