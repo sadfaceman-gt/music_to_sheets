@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ImportError } from '../../src/audio/decode.ts';
 import type { DecodedSong } from '../../src/audio/decode.ts';
 import { analysisKey } from '../../src/core/analysis/tempo.ts';
-import { ANALYSIS_VERSION, DEFAULT_ANALYSIS_SETTINGS } from '../../src/core/analysis/types.ts';
+import { ANALYSIS_VERSION, DEFAULT_ANALYSIS_SETTINGS, settingsFor } from '../../src/core/analysis/types.ts';
 import type { Analysis } from '../../src/core/analysis/types.ts';
 import { SOURCES_FOLDER, sourceFileNames } from '../../src/core/project/schema.ts';
 import { MtsDb } from '../../src/storage/db.ts';
@@ -270,6 +270,83 @@ describe('delete', () => {
     expect(await store.getAnalysis(analysis.key)).toEqual(analysis);
     await store.delete(b.id);
     expect(await db.artifacts.get(analysis.key)).toBeUndefined();
+  });
+
+  it('keeps both trackers analyses while another project uses them, then deletes them', async () => {
+    const { store, db } = setup();
+    const a = (await store.importFile(song('a.mp3', 'a'))).project;
+    const bt = analysisFor(a.source.sha256);
+    const dsp = { ...bt, settings: settingsFor('dsp'), key: analysisKey(a.source.sha256, settingsFor('dsp')), backend: null };
+    await store.putAnalysis(bt);
+    await store.putAnalysis(dsp);
+    const both = { ...a.trackers, 'beatthis-small0': { analysisKey: bt.key, corrections: [] }, dsp: { analysisKey: dsp.key, corrections: [] } };
+    await store.save({ ...a, trackers: both });
+    const b = (await store.importFile(song('a.mp3', 'a'), undefined, 'new')).project;
+    // b only ran the DSP tracker; a's Beat This! analysis is no longer used by anyone but a.
+    await store.save({ ...b, tracker: 'dsp', trackers: { ...b.trackers, dsp: { analysisKey: dsp.key, corrections: [] } } });
+    await store.delete(a.id);
+    expect(await db.artifacts.get(bt.key)).toBeUndefined();
+    expect(await db.artifacts.get(dsp.key)).toBeDefined();
+    await store.delete(b.id);
+    expect(await db.artifacts.get(dsp.key)).toBeUndefined();
+  });
+
+  it('keeps both analyses when the other project uses both', async () => {
+    const { store, db } = setup();
+    const a = (await store.importFile(song('a.mp3', 'a'))).project;
+    const bt = analysisFor(a.source.sha256);
+    const dsp = { ...bt, settings: settingsFor('dsp'), key: analysisKey(a.source.sha256, settingsFor('dsp')), backend: null };
+    await store.putAnalysis(bt);
+    await store.putAnalysis(dsp);
+    const both = { ...a.trackers, 'beatthis-small0': { analysisKey: bt.key, corrections: [] }, dsp: { analysisKey: dsp.key, corrections: [] } };
+    await store.save({ ...a, trackers: both });
+    const b = (await store.importFile(song('a.mp3', 'a'), undefined, 'new')).project;
+    await store.save({ ...b, trackers: both });
+    await store.delete(a.id);
+    expect(await db.artifacts.get(bt.key)).toBeDefined();
+    expect(await db.artifacts.get(dsp.key)).toBeDefined();
+  });
+});
+
+describe('schema v1 rows (cycle 4 projects)', () => {
+  beforeEach(() => vi.spyOn(console, 'warn').mockImplementation(() => undefined));
+
+  /** Rewrites a stored project as a cycle 4 (schema v1) record. */
+  async function asV1(db: MtsDb, id: string, corrections: unknown[]): Promise<void> {
+    const row = (await db.projects.get(id))!;
+    const { tracker: _t, trackers: _ts, ...rest } = row;
+    void _t;
+    void _ts;
+    await db.projects.put({ ...rest, schemaVersion: 1, analysisKey: 'v1-key', corrections });
+  }
+
+  it('opens a v1 row as v2 with its corrections on the DSP tracker, and rewrites it as v2 on save', async () => {
+    const { store, db } = setup();
+    const a = (await store.importFile(song('a.mp3', 'a'))).project;
+    const corrections = [{ kind: 'double' }];
+    await asV1(db, a.id, corrections);
+
+    const opened = (await store.open(a.id))!;
+    expect(opened.schemaVersion).toBe(2);
+    expect(opened.tracker).toBe('dsp');
+    expect(opened.trackers.dsp.corrections).toEqual(corrections);
+
+    await asV1(db, a.id, corrections);
+    await store.save(opened);
+    const raw = (await db.projects.get(a.id))!;
+    expect(raw.schemaVersion).toBe(2);
+    expect(raw).not.toHaveProperty('corrections');
+    expect((raw.trackers as { dsp: { corrections: unknown[] } }).dsp.corrections).toEqual(corrections);
+  });
+
+  it('lists and deletes with mixed v1 and v2 rows', async () => {
+    const { store, db } = setup();
+    const a = (await store.importFile(song('a.mp3', 'a'))).project;
+    const b = (await store.importFile(song('b.mp3', 'b'))).project;
+    await asV1(db, a.id, []);
+    expect((await store.list()).map((p) => p.schemaVersion)).toEqual([2, 2]);
+    await store.delete(a.id);
+    expect((await store.list()).map((p) => p.id)).toEqual([b.id]);
   });
 });
 

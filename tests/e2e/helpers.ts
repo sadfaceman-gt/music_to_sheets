@@ -26,6 +26,10 @@ export interface MtsHooks {
     getPlayback(): { playing: boolean; contextState: string | null; songTime: number | null; clicksScheduled: number; downbeatClicks: number; subClicks: number };
     getAnalysisState(): 'idle' | 'running' | 'done' | 'cancelled' | 'error';
     getView(): { start: number; secPerPx: number };
+    getTracker(): 'beatthis-small0' | 'dsp' | null;
+    getBackend(): 'webgpu' | 'wasm' | null;
+    getFallbackReason(): string | null;
+    getElapsedMs(): number | null;
   };
   __mtsView?: { cellToClient(c: number, r: number): { x: number; y: number }; getViewport(): { cellSize: number; scrollCol: number } };
 }
@@ -113,6 +117,10 @@ export const ana = {
   state: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getAnalysisState()),
   projectId: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getProjectId()),
   view: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getView()),
+  tracker: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getTracker()),
+  backend: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getBackend()),
+  fallbackReason: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getFallbackReason()),
+  elapsedMs: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getElapsedMs()),
   /** Waits until the analysis is done (the import and the DSP run in the page). */
   async waitDone(page: Page) {
     await page.waitForFunction(() => (globalThis as unknown as MtsHooks).__mtsAnalysis?.getAnalysisState() === 'done', undefined, { timeout: 90_000 });

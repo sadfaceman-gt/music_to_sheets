@@ -8,6 +8,11 @@ export interface MtsAnalysisHook {
   getAnalysisState(): 'idle' | 'running' | 'done' | 'cancelled' | 'error';
   /** The waveform window: start in seconds and seconds per pixel. */
   getView(): { start: number; secPerPx: number };
+  /** The tracker that made the shown analysis, its backend (null for DSP), why Beat This! was replaced by DSP, and the run time. */
+  getTracker(): 'beatthis-small0' | 'dsp' | null;
+  getBackend(): 'webgpu' | 'wasm' | null;
+  getFallbackReason(): string | null;
+  getElapsedMs(): number | null;
 }
 
 declare global {

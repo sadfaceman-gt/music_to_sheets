@@ -134,16 +134,18 @@ export function withTracker(project: Project, tracker: BeatTracker, state: Track
 /**
  * v1 -> v2: v1 analyses came from the DSP tracker, so v1 corrections move to `trackers.dsp`; its analysisKey becomes
  * null because ANALYSIS_VERSION 2 changed the keys (the DSP grid is the same, so the corrections still fit when it
- * re-runs). The shown tracker becomes DEFAULT_TRACKER.
+ * re-runs). The shown tracker becomes DEFAULT_TRACKER, except when the project has corrections: those fit the DSP
+ * grid, so the project keeps showing it and the user finds their work where they left it (M2b, 5-ui).
  */
 export function migrateProjectV1(raw: Record<string, unknown>): Record<string, unknown> {
   const { analysisKey: _key, corrections, ...rest } = raw;
   void _key;
+  const kept = Array.isArray(corrections) ? corrections : [];
   return {
     ...rest,
     schemaVersion: PROJECT_SCHEMA_VERSION,
-    tracker: DEFAULT_TRACKER,
-    trackers: { 'beatthis-small0': { analysisKey: null, corrections: [] }, dsp: { analysisKey: null, corrections: Array.isArray(corrections) ? corrections : [] } },
+    tracker: kept.length > 0 ? 'dsp' : DEFAULT_TRACKER,
+    trackers: { 'beatthis-small0': { analysisKey: null, corrections: [] }, dsp: { analysisKey: null, corrections: kept } },
   };
 }
 
