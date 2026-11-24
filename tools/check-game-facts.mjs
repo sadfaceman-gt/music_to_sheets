@@ -2,6 +2,7 @@
 // Done check for "no game facts in code" (CLAUDE.md hard rule, Design 2.8).
 // Scans src/ (except src/core/profile/, which loads the profile) for values that
 // belong in public/profiles/growtopia-default.json. Exit code 1 lists every hit.
+// Lines marked `// facts-ok: <why>` are skipped (the reason is required).
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
@@ -35,6 +36,8 @@ for (const file of files(join(root, 'src'))) {
   const rel = relative(root, file);
   if (rel.startsWith('src/core/profile/')) continue;
   readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
+    // A line marked `// facts-ok: <why>` holds a number that only looks like a game fact (e.g. a percent).
+    if (/\/\/\s*facts-ok:\s*\S/.test(line)) return;
     const code = line
       .replace(/\/\/.*$/, '')
       .replace(/^\s*\*.*$/, '') // ignore comments
