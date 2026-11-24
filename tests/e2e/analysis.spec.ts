@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { ana } from './helpers.ts';
-import { song34, song44 } from './songs.ts';
+import { makeSong, song34, song44 } from './songs.ts';
 import type { UploadFile } from './media.ts';
 
 async function openSong(page: Page, song: UploadFile) {
@@ -147,7 +147,9 @@ test('re-run asks first and clears the corrections', async ({ page }) => {
 test('cancelling the analysis leaves a Run analysis button', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('mts.firstRunDone', 'yes'));
   await page.goto('./');
-  await page.getByTestId('import-input').setInputFiles(song44());
-  await page.getByTestId('cancel-analysis').click({ timeout: 30_000 });
+  // A long song, so the analysis is still running when Cancel is clicked.
+  const long: UploadFile = { name: 'long.wav', mimeType: 'audio/wav', buffer: makeSong({ bpm: 120, beatsPerBar: 4, seconds: 300 }) };
+  await page.getByTestId('import-input').setInputFiles(long);
+  await page.getByTestId('cancel-analysis').click({ timeout: 60_000 });
   await expect(page.getByTestId('run-analysis')).toBeVisible();
 });
