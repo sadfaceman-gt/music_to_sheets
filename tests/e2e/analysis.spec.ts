@@ -106,11 +106,11 @@ test('plays the song with a click track', async ({ page }) => {
   await openSong(page, song44());
   await page.getByTestId('play-song').click();
   await expect.poll(async () => (await ana.playback(page)).playing).toBe(true);
-  await page.waitForTimeout(1500);
+  // CI's audio clock can start slowly (null sink); wait for it instead of sampling once at a fixed time.
+  await expect.poll(async () => (await ana.playback(page)).contextState, { timeout: 10_000 }).toBe('running');
+  await expect.poll(async () => (await ana.playback(page)).downbeatClicks, { timeout: 10_000 }).toBeGreaterThan(0);
   const a = await ana.playback(page);
-  expect(a.contextState).toBe('running');
   expect(a.clicksScheduled).toBeGreaterThan(0);
-  expect(a.downbeatClicks).toBeGreaterThan(0);
   await page.waitForTimeout(1000);
   const b = await ana.playback(page);
   expect(b.songTime!).toBeGreaterThan(a.songTime!);
