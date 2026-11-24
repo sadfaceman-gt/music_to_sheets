@@ -15,7 +15,7 @@ interface Ref {
 
 describe.skipIf(!existsSync('test/ref'))('beat tracker against librosa (local benchmark)', () => {
   const dir = 'test/ref';
-  const songs = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.json') && f !== 'results.json') : [];
+  const songs = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.json') && f !== 'results.json' && existsSync(`${dir}/${f.replace(/\.json$/, '')}.f32`)) : [];
   const rows: Record<string, unknown>[] = [];
 
   for (const file of songs) {

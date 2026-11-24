@@ -2,9 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ProjectStore } from '../storage/projects.ts';
 import { createAutosave } from '../storage/projects.ts';
 import type { Autosave } from '../storage/projects.ts';
+import { activeTracker, withTracker } from '../core/project/schema.ts';
 import type { Project } from '../core/project/schema.ts';
 import type { WaveformPeaks } from '../core/analysis/peaks.ts';
-import { DEFAULT_ANALYSIS_SETTINGS, DRIFT_WARN_PERCENT } from '../core/analysis/types.ts';
+import { DRIFT_WARN_PERCENT, settingsFor } from '../core/analysis/types.ts';
 import type { Analysis, BeatGrid, Correction, StageProgress } from '../core/analysis/types.ts';
 import { analysisKey, gridTempo } from '../core/analysis/tempo.ts';
 import { applyCorrections, tapTempo } from '../core/analysis/corrections.ts';
@@ -106,7 +107,10 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
       const { project: p, analysis: a } = live.current;
       if (!p || !a) return;
       const effective = applyCorrections(a.grid, next.corrections, a.durationSec);
-      const updated: Project = { ...p, corrections: next.corrections, tempoBpm: effective.beats.length > 1 ? gridTempo(effective.beats) : a.tempoBpm };
+      const updated: Project = {
+        ...withTracker(p, p.tracker, { ...activeTracker(p), corrections: next.corrections }),
+        tempoBpm: effective.beats.length > 1 ? gridTempo(effective.beats) : a.tempoBpm,
+      };
       setProject(updated);
       live.current.project = updated;
       save(updated);
@@ -125,14 +129,17 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
       setProgress({ stage: 'decode', fraction: 0, etaSeconds: null });
       try {
         const mono = await store.loadMono(p);
-        const j = startAnalysis(mono, p.source.sha256, DEFAULT_ANALYSIS_SETTINGS, setProgress);
+        const j = startAnalysis(mono, p.source.sha256, settingsFor(p.tracker), setProgress);
         job.current = j;
-        const result = await j.promise;
+        const { analysis: result } = await j.promise; // 5-ui: show fallbackReason and store under result.settings.tracker
         job.current = null;
         await store.putAnalysis(result);
-        const corrections = clearCorrections ? [] : p.corrections;
+        const corrections = clearCorrections ? [] : activeTracker(p).corrections;
         const effective = applyCorrections(result.grid, corrections, result.durationSec);
-        const updated: Project = { ...p, analysisKey: result.key, tempoBpm: effective.beats.length > 1 ? gridTempo(effective.beats) : result.tempoBpm, corrections };
+        const updated: Project = {
+          ...withTracker(p, p.tracker, { analysisKey: result.key, corrections }),
+          tempoBpm: effective.beats.length > 1 ? gridTempo(effective.beats) : result.tempoBpm,
+        };
         await store.save(updated);
         live.current.project = updated;
         setProject(updated);
@@ -169,11 +176,11 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
         setProject(p);
         live.current.project = p;
         setPeaks(await store.getPeaks(p));
-        const a = await store.getAnalysis(p.analysisKey ?? analysisKey(p.source.sha256, DEFAULT_ANALYSIS_SETTINGS));
+        const a = await store.getAnalysis(activeTracker(p).analysisKey ?? analysisKey(p.source.sha256, settingsFor(p.tracker)));
         if (cancelled) return;
         if (a) {
           setAnalysis(a);
-          setCs(emptyCorrections(p.corrections));
+          setCs(emptyCorrections(activeTracker(p).corrections));
           setRunState('done');
           onAnalysed(p.id, true);
         } else {

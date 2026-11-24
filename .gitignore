@@ -7,6 +7,8 @@ CLAUDE.md
 .agents/*
 .claude/*
 *.onnx
+# our own Beat This! export ships with the site (Design 3.2, decided 2026-11-24)
+!public/models/beat_this_small0.onnx
 tools/.venv*/
 
 # Build and tooling

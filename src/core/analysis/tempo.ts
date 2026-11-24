@@ -56,9 +56,9 @@ export function fnv1a(text: string): string {
   return (h >>> 0).toString(16).padStart(8, '0');
 }
 
-/** Cache key of an analysis: the source's SHA-256, the analysis version and a hash of the settings (Design 3.4). */
+/** Cache key of an analysis: the source's SHA-256, the analysis version, the tracker and a hash of the settings (Design 3.4). */
 export function analysisKey(sourceSha256: string, settings: AnalysisSettings): string {
   const keys = Object.keys(settings).sort() as (keyof AnalysisSettings)[];
   const canonical = keys.map((k) => `${k}=${settings[k]}`).join(';');
-  return `analysis:${sourceSha256}:v${ANALYSIS_VERSION}:${fnv1a(canonical)}`;
+  return `analysis:${sourceSha256}:v${ANALYSIS_VERSION}:${settings.tracker}:${fnv1a(canonical)}`;
 }

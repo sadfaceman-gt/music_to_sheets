@@ -81,6 +81,7 @@ function analysisFor(sha: string): Analysis {
     chords: [],
     sections: [],
     elapsedMs: 5,
+    backend: null,
   };
 }
 
@@ -93,7 +94,9 @@ describe('importFile', () => {
     const { project, existing } = await store.importFile(song('My Song.mp3', 'abc'), (p) => stages.push(p.fraction));
     expect(existing).toBe(false);
     expect(project.meta.name).toBe('My Song');
-    expect(project.analysisKey).toBeNull();
+    expect(project.trackers['beatthis-small0'].analysisKey).toBeNull();
+    expect(project.trackers.dsp.analysisKey).toBeNull();
+    expect(project.tracker).toBe('beatthis-small0');
     expect(stages).toEqual([0.1, 0.6, 0.9, 1]);
     const names = sourceFileNames(project.source.sha256, 'mp3');
     expect([...o.files.keys()].sort()).toEqual([names.original, names.stereo, names.mono].map((x) => `${SOURCES_FOLDER}/${x}`).sort());
@@ -138,7 +141,7 @@ describe('importFile', () => {
     expect(second.project.id).not.toBe(first.id);
     expect(second.project.meta.name).toBe('a (2)');
     expect(second.project.source).toEqual(first.source);
-    expect(second.project.analysisKey).toBeNull();
+    expect(second.project.trackers['beatthis-small0'].analysisKey).toBeNull();
     expect(decode).toHaveBeenCalledTimes(1);
     expect(o.files.size).toBe(files);
     expect((await store.list()).length).toBe(2);
@@ -205,9 +208,9 @@ describe('save, open, list', () => {
     const opened = await store.open(a.id);
     expect(opened!.meta.lastOpenedAt).toBeGreaterThan(b.meta.lastOpenedAt);
     expect((await store.list()).map((p) => p.id)).toEqual([a.id, b.id]);
-    await store.save({ ...a, corrections: [{ kind: 'double' }], tempoBpm: 100 });
+    await store.save({ ...a, trackers: { ...a.trackers, 'beatthis-small0': { analysisKey: null, corrections: [{ kind: 'double' }] } }, tempoBpm: 100 });
     const saved = (await store.get(a.id))!;
-    expect(saved.corrections).toEqual([{ kind: 'double' }]);
+    expect(saved.trackers['beatthis-small0'].corrections).toEqual([{ kind: 'double' }]);
     expect(saved.meta.updatedAt).toBeGreaterThan(a.meta.updatedAt);
     expect(await store.open('missing')).toBeNull();
   });
@@ -235,7 +238,7 @@ describe('delete', () => {
     const { store, o, db } = setup();
     const p = (await store.importFile(song('a.mp3', 'a'))).project;
     await store.putAnalysis(analysisFor(p.source.sha256));
-    await store.save({ ...p, analysisKey: analysisFor(p.source.sha256).key });
+    await store.save({ ...p, trackers: { ...p.trackers, 'beatthis-small0': { analysisKey: analysisFor(p.source.sha256).key, corrections: [] } } });
     await store.delete(p.id);
     expect(await store.list()).toEqual([]);
     expect(o.files.size).toBe(0);
@@ -260,9 +263,9 @@ describe('delete', () => {
     const a = (await store.importFile(song('a.mp3', 'a'))).project;
     const analysis = analysisFor(a.source.sha256);
     await store.putAnalysis(analysis);
-    await store.save({ ...a, analysisKey: analysis.key });
+    await store.save({ ...a, trackers: { ...a.trackers, 'beatthis-small0': { analysisKey: analysis.key, corrections: [] } } });
     const b = (await store.importFile(song('a.mp3', 'a'), undefined, 'new')).project;
-    await store.save({ ...b, analysisKey: analysis.key });
+    await store.save({ ...b, trackers: { ...b.trackers, 'beatthis-small0': { analysisKey: analysis.key, corrections: [] } } });
     await store.delete(a.id);
     expect(await store.getAnalysis(analysis.key)).toEqual(analysis);
     await store.delete(b.id);
