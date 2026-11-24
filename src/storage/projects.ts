@@ -247,9 +247,10 @@ export function createProjectStore(overrides?: Partial<StoreDeps>): ProjectStore
       await db.transaction('rw', db.projects, db.artifacts, async () => {
         await db.projects.delete(id);
         if (!p) return;
-        if (p.analysisKey) await db.artifacts.delete(p.analysisKey);
-        const others = await db.projects.where('source.sha256').equals(p.source.sha256).count();
-        if (others === 0) await db.artifacts.delete(p.peaksKey);
+        const others = await db.projects.where('source.sha256').equals(p.source.sha256).toArray();
+        // Projects for the same song share the analysis (same key) and the peaks: keep them while one still uses them.
+        if (p.analysisKey && !others.some((o) => o.analysisKey === p.analysisKey)) await db.artifacts.delete(p.analysisKey);
+        if (others.length === 0) await db.artifacts.delete(p.peaksKey);
       });
       if (!p) return;
       if ((await db.projects.where('source.sha256').equals(p.source.sha256).count()) > 0) return;

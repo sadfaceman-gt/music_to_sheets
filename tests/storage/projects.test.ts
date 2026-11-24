@@ -254,6 +254,20 @@ describe('delete', () => {
     expect(o.files.size).toBe(0);
     expect(await db.artifacts.get(a.peaksKey)).toBeUndefined();
   });
+
+  it('keeps a shared analysis while another project for the same song uses it (T33 follow-up)', async () => {
+    const { store, db } = setup();
+    const a = (await store.importFile(song('a.mp3', 'a'))).project;
+    const analysis = analysisFor(a.source.sha256);
+    await store.putAnalysis(analysis);
+    await store.save({ ...a, analysisKey: analysis.key });
+    const b = (await store.importFile(song('a.mp3', 'a'), undefined, 'new')).project;
+    await store.save({ ...b, analysisKey: analysis.key });
+    await store.delete(a.id);
+    expect(await store.getAnalysis(analysis.key)).toEqual(analysis);
+    await store.delete(b.id);
+    expect(await db.artifacts.get(analysis.key)).toBeUndefined();
+  });
 });
 
 describe('analysis and peaks rows', () => {
