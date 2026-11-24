@@ -38,8 +38,8 @@ async function loadOrt(backend: InferenceBackend): Promise<Ort> {
 async function hasWebGpu(): Promise<boolean> {
   try {
     type Adapter = { info?: { isFallbackAdapter?: boolean }; isFallbackAdapter?: boolean };
-    const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<Adapter | null> } }).gpu;
-    const adapter = gpu ? await gpu.requestAdapter() : null;
+    const gpu = (navigator as unknown as { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
+    const adapter = (gpu ? await gpu.requestAdapter() : null) as Adapter | null;
     // A software (fallback) adapter such as SwiftShader runs the model far slower than WASM: treat it as no WebGPU.
     return !!adapter && !(adapter.info?.isFallbackAdapter ?? adapter.isFallbackAdapter ?? false);
   } catch {
