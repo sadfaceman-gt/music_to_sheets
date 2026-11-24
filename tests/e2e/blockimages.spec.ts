@@ -9,7 +9,7 @@ const trumpet = kinds.filter((k) => k.block === 'mexican_trumpet').map((k) => k.
 
 test.beforeEach(async ({ page }) => {
   await withoutDirectoryPicker(page);
-  await page.goto('./');
+  await page.goto('./#/editor');
   await expect(page.getByTestId('first-run')).toBeVisible();
 });
 
