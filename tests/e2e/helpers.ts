@@ -18,13 +18,22 @@ export interface MtsHooks {
     getSongName(): string | null;
     getLastImport(): { issues: number; skipped: number; warnings: number; supported: boolean } | null;
   };
+  __mtsAnalysis?: {
+    getProjectId(): string;
+    getGrid(): { beats: number[]; downbeats: number[]; meter: string } | null;
+    getTempo(): number | null;
+    getCorrections(): unknown[];
+    getPlayback(): { playing: boolean; contextState: string | null; songTime: number | null; clicksScheduled: number; downbeatClicks: number; subClicks: number };
+    getAnalysisState(): 'idle' | 'running' | 'done' | 'cancelled' | 'error';
+    getView(): { start: number; secPerPx: number };
+  };
   __mtsView?: { cellToClient(c: number, r: number): { x: number; y: number }; getViewport(): { cellSize: number; scrollCol: number } };
 }
 
 /** Opens the editor directly (the first-run screen already finished). */
 export async function openEditor(page: Page): Promise<void> {
   await page.addInitScript(() => localStorage.setItem('mts.firstRunDone', 'yes'));
-  await page.goto('./');
+  await page.goto('./#/editor');
   await page.getByTestId('strip-canvas').waitFor();
   await page.waitForFunction(() => (globalThis as unknown as MtsHooks).__mtsTest !== undefined && (globalThis as unknown as MtsHooks).__mtsView !== undefined);
 }
@@ -94,3 +103,18 @@ export async function bandPoint(page: Page, col: number) {
   const { cellSize } = await page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsView!.getViewport());
   return { x: p.x, y: p.y + cellSize / 2 + 7 };
 }
+
+/** Reads of the Import and analysis screen's test hook (each evaluate body must be self-contained). */
+export const ana = {
+  grid: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getGrid()),
+  tempo: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getTempo()),
+  corrections: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getCorrections()),
+  playback: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getPlayback()),
+  state: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getAnalysisState()),
+  projectId: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getProjectId()),
+  view: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getView()),
+  /** Waits until the analysis is done (the import and the DSP run in the page). */
+  async waitDone(page: Page) {
+    await page.waitForFunction(() => (globalThis as unknown as MtsHooks).__mtsAnalysis?.getAnalysisState() === 'done', undefined, { timeout: 90_000 });
+  },
+};

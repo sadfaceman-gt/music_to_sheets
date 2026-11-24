@@ -7,6 +7,7 @@ CLAUDE.md
 .agents/*
 .claude/*
 *.onnx
+tools/.venv*/
 
 # Build and tooling
 node_modules/

@@ -1,12 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AudioSession } from './audioSession.ts';
 import { FirstRun } from './FirstRun.tsx';
 import { firstRunDone } from './firstRunFlag.ts';
 import { parseGameProfile } from '../core/profile/schema.ts';
 import type { GameProfile } from '../core/profile/schema.ts';
 import { Editor } from '../editor/Editor.tsx';
+import { createEditorStore } from '../editor/store.ts';
 import { DEFAULT_ROW_COLOR_PROFILE, rowColorProfile } from '../editor/view/rowColors.ts';
 import { SettingsPanel } from './SettingsPanel.tsx';
+import { useRoute } from './router.ts';
+import { Stepper } from './Stepper.tsx';
+import { ProjectsScreen } from './ProjectsScreen.tsx';
+import { AnalysisScreen } from './AnalysisScreen.tsx';
+import { getStore } from './store.ts';
 
 const ROW_COLORS_KEY = 'mts.rowColors';
 
@@ -40,9 +46,32 @@ export function App() {
     }
   };
 
+  const [route, navigate] = useRoute();
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [analysedIds, setAnalysedIds] = useState<ReadonlySet<string>>(new Set());
+  const [notice, setNotice] = useState<string | null>(null);
+  const onAnalysed = useCallback((id: string, analysed: boolean) => {
+    setAnalysedIds((prev) => {
+      if (prev.has(id) === analysed) return prev;
+      const next = new Set(prev);
+      if (analysed) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+  const routeId = route.screen === 'analysis' ? route.id : null;
+  const currentId = routeId ?? openId;
+  if (routeId && routeId !== openId) setOpenId(routeId);
+  const openProject = (id: string, text?: string) => {
+    setNotice(text ?? null);
+    navigate({ screen: 'analysis', id });
+  };
+
   const [showFirstRun, setShowFirstRun] = useState(() => !firstRunDone());
   const profile = load.state === 'ready' ? load.profile : null;
   const session = useMemo(() => (profile ? new AudioSession(profile) : null), [profile]);
+  // One editor store for the whole visit, so going to another screen and back keeps the sheet and its undo history.
+  const editorStore = useMemo(() => (profile ? createEditorStore(profile) : null), [profile]);
   useEffect(() => {
     void session?.init();
   }, [session]);
@@ -66,6 +95,7 @@ export function App() {
     <div className="flex h-screen flex-col">
       <header className="flex items-center justify-between border-b border-slate-800 px-3 py-2">
         <h1 className="text-lg font-bold">Music to Sheets</h1>
+        <Stepper route={route} openProjectId={currentId} analysed={currentId !== null && analysedIds.has(currentId)} onNavigate={navigate} />
         <button
           type="button"
           data-testid="settings-button"
@@ -83,7 +113,12 @@ export function App() {
           <p className="mt-2 text-sm text-slate-400">Reload the page to try again.</p>
         </div>
       )}
-      {load.state === 'ready' && session && (showFirstRun ? <FirstRun session={session} onDone={() => setShowFirstRun(false)} /> : <Editor profile={load.profile} session={session} rowColors={rowColors} />)}
+      {load.state === 'ready' && session && showFirstRun && <FirstRun session={session} onDone={() => setShowFirstRun(false)} />}
+      {load.state === 'ready' && session && !showFirstRun && route.screen === 'editor' && editorStore && <Editor profile={load.profile} session={session} rowColors={rowColors} store={editorStore} />}
+      {load.state === 'ready' && !showFirstRun && route.screen === 'projects' && <ProjectsScreen store={getStore()} onOpen={openProject} />}
+      {load.state === 'ready' && !showFirstRun && route.screen === 'analysis' && (
+        <AnalysisScreen key={route.id} store={getStore()} projectId={route.id} notice={notice} onAnalysed={onAnalysed} />
+      )}
       <footer className="border-t border-slate-800 px-3 py-1 text-xs text-slate-500">
         Unofficial fan tool, not affiliated with or endorsed by Ubisoft. Growtopia is a trademark of its owner. Your audio
         stays on your device.
