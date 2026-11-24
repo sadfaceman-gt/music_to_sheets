@@ -104,16 +104,15 @@ export async function bandPoint(page: Page, col: number) {
   return { x: p.x, y: p.y + cellSize / 2 + 7 };
 }
 
-const A = () => (globalThis as unknown as MtsHooks).__mtsAnalysis!;
-/** Reads of the Import and analysis screen's test hook. */
+/** Reads of the Import and analysis screen's test hook (each evaluate body must be self-contained). */
 export const ana = {
-  grid: (page: Page) => page.evaluate(() => A().getGrid()),
-  tempo: (page: Page) => page.evaluate(() => A().getTempo()),
-  corrections: (page: Page) => page.evaluate(() => A().getCorrections()),
-  playback: (page: Page) => page.evaluate(() => A().getPlayback()),
-  state: (page: Page) => page.evaluate(() => A().getAnalysisState()),
-  projectId: (page: Page) => page.evaluate(() => A().getProjectId()),
-  view: (page: Page) => page.evaluate(() => A().getView()),
+  grid: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getGrid()),
+  tempo: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getTempo()),
+  corrections: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getCorrections()),
+  playback: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getPlayback()),
+  state: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getAnalysisState()),
+  projectId: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getProjectId()),
+  view: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getView()),
   /** Waits until the analysis is done (the import and the DSP run in the page). */
   async waitDone(page: Page) {
     await page.waitForFunction(() => (globalThis as unknown as MtsHooks).__mtsAnalysis?.getAnalysisState() === 'done', undefined, { timeout: 90_000 });

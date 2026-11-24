@@ -75,10 +75,21 @@ test('tapping 6 times at 0.5 s gives 120 BPM', async ({ page }) => {
   await openSong(page, song44());
   await page.getByTestId('half-tempo').click(); // move the tempo off 120 first
   expect(await ana.tempo(page)).toBeLessThan(70);
-  for (let i = 0; i < 6; i++) {
-    await page.getByTestId('tap-button').click();
-    await page.waitForTimeout(500);
-  }
+  // Tap inside the page on a 500 ms timer, so Playwright's round trips don't stretch the spacing.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        const button = document.querySelector<HTMLButtonElement>('[data-testid="tap-button"]')!;
+        let n = 0;
+        const id = setInterval(() => {
+          button.click();
+          if (++n === 6) {
+            clearInterval(id);
+            resolve();
+          }
+        }, 500);
+      }),
+  );
   await page.getByTestId('apply-taps').click();
   expect(await ana.tempo(page)).toBeGreaterThan(115);
   expect(await ana.tempo(page)).toBeLessThan(125);

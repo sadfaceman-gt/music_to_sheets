@@ -21,7 +21,7 @@ interface Hooks {
 test.beforeEach(async ({ page }) => {
   // The first-run screen (M1b) is covered in firstrun.spec.ts; these tests start in the editor.
   await page.addInitScript(() => localStorage.setItem('mts.firstRunDone', 'yes'));
-  await page.goto('./');
+  await page.goto('./#/editor');
   await page.getByTestId('strip-canvas').waitFor();
   await page.waitForFunction(() => (globalThis as unknown as Hooks).__mtsTest !== undefined && (globalThis as unknown as Hooks).__mtsView !== undefined);
 });

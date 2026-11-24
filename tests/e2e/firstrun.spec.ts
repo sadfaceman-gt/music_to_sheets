@@ -12,7 +12,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 async function openFirstRun(page: Page) {
-  await page.goto('./');
+  await page.goto('./#/editor');
   await expect(page.getByTestId('first-run')).toBeVisible();
 }
 
