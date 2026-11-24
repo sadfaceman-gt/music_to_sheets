@@ -52,6 +52,68 @@ export function priorWeight(bpm: number, priorBpm: number, octaves: number): num
   return Math.exp(-0.5 * z * z);
 }
 
+function refineLag(ac: Float64Array, lag: number): number {
+  const a = ac[lag - 1]!;
+  const b = ac[lag]!;
+  const c = ac[lag + 1]!;
+  const denom = a - 2 * b + c;
+  const shift = denom < 0 ? (0.5 * (a - c)) / denom : 0;
+  return lag + Math.max(-0.5, Math.min(0.5, shift));
+}
+
+/**
+ * Global period in frames chosen in two steps: (a) score each candidate lag by its metrical family (log-compressed
+ * autocorrelation at p plus half of it at 2p and at p/2, no prior) and keep the best family; (b) inside that family
+ * (p/2, p, 2p within the BPM limits) pick the level the log-normal prior favours. 0 if there is no period.
+ */
+export function familyPeriod(
+  ac: Float64Array,
+  frameRate: number,
+  priorBpm: number,
+  octaves: number,
+  minBpm: number,
+  maxBpm: number,
+): number {
+  const L = (lag: number): number => Math.log1p(1e6 * Math.max(0, ac[lag]!)); // facts-ok: log compression gain
+  const lagMin = Math.max(2, Math.ceil((60 * frameRate) / maxBpm));
+  const lagMax = Math.min(ac.length - 2, Math.floor((60 * frameRate) / minBpm));
+  let bestScore = 0;
+  let bestLag = 0;
+  for (let lag = Math.max(2, lagMin); lag <= lagMax; lag++) {
+    let score = L(lag);
+    if (2 * lag <= ac.length - 2) score += 0.5 * L(2 * lag);
+    const half = Math.round(lag / 2);
+    if (half >= 2) score += 0.5 * L(half);
+    if (score > bestScore) {
+      bestScore = score;
+      bestLag = lag;
+    }
+  }
+  if (bestLag === 0) return 0;
+  const members: number[] = [bestLag];
+  if (2 * bestLag <= ac.length - 2) members.push(2 * bestLag);
+  const half = Math.round(bestLag / 2);
+  if (half >= 2) members.push(half);
+  let pick = 0;
+  let pickW = -1;
+  for (const lag of members) {
+    if (lag < lagMin || lag > lagMax) continue;
+    const w = priorWeight((60 * frameRate) / lag, priorBpm, octaves);
+    if (w > pickW) {
+      pickW = w;
+      pick = lag;
+    }
+  }
+  if (pick === 0) return bestPeriod(ac, frameRate, priorBpm, octaves, minBpm, maxBpm);
+  // Snap to the local autocorrelation maximum (the p/2 and 2p members are only approximate).
+  let lag = pick;
+  for (const d of [-1, 1]) {
+    const l = pick + d;
+    if (l >= lagMin && l <= lagMax && ac[l]! > ac[lag]!) lag = l;
+  }
+  return refineLag(ac, lag);
+}
+
 /** Best period in frames (sub-frame by parabolic interpolation) from an autocorrelation; 0 if there is none. */
 export function bestPeriod(
   ac: Float64Array,

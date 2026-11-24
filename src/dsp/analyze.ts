@@ -7,7 +7,7 @@
 import type { AnalysisSettings, BeatGrid, ProgressCallback, StageProgress, TempoPoint } from '../core/analysis/types.ts';
 import { driftPercent, tempoCurve } from '../core/analysis/tempo.ts';
 import { spectralFeatures } from './onset.ts';
-import { averageAutocorrelation, bestPeriod, TEMPOGRAM_WINDOW } from './tempogram.ts';
+import { averageAutocorrelation, bestPeriod, familyPeriod, TEMPOGRAM_WINDOW } from './tempogram.ts';
 import { localScore, trackBeats, trimBeats } from './beats.ts';
 import { beatNovelty, detectDownbeats } from './downbeats.ts';
 
@@ -27,6 +27,8 @@ function median(xs: number[]): number {
   const m = s.length >> 1;
   return s.length === 0 ? 0 : s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
 }
+
+const DRIFT_WINDOW = 33; // facts-ok: beats, about 8 bars; smooths frame-quantised DP beats
 
 /** Local beat period (frames) per tempogram window, near the global period; interpolated per frame. */
 function localPeriods(onset: Float32Array, globalPeriod: number, frameRate: number, s: AnalysisSettings): Float64Array {
@@ -98,7 +100,7 @@ export function analyzeBeats(mono: Float32Array, sampleRate: number, settings: A
   const feat = spectralFeatures(mono, sampleRate, settings.fftSize, hop, (f) => report('onset', 0.6 * f)); // facts-ok: stage share
   report('tempo', 0.6);
   const ac = averageAutocorrelation(feat.onset);
-  const period = bestPeriod(ac, frameRate, settings.tempoPriorBpm, settings.tempoPriorOctaves, settings.minBpm, settings.maxBpm);
+  const period = familyPeriod(ac, frameRate, settings.tempoPriorBpm, settings.tempoPriorOctaves, settings.minBpm, settings.maxBpm);
   if (period <= 0) {
     report('downbeats', 1);
     return empty;
@@ -125,6 +127,6 @@ export function analyzeBeats(mono: Float32Array, sampleRate: number, settings: A
     grid: { beats, downbeats, meter },
     tempoBpm,
     tempoCurve: curve,
-    driftPercent: driftPercent(curve, tempoBpm),
+    driftPercent: driftPercent(tempoCurve(beats, DRIFT_WINDOW), tempoBpm),
   };
 }
