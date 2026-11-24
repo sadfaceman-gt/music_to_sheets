@@ -153,8 +153,23 @@ function useShortcuts(
   }, [store, enabled, hoverRef, setTool, keysEnabled, bindings, listening, pickBlock, onAction]);
 }
 
-export function Editor({ profile, session, rowColors = DEFAULT_ROW_COLOR_PROFILE }: { profile: GameProfile; session: AudioSession; rowColors?: string }) {
-  const [store] = useState<EditorStore>(() => createEditorStore(profile));
+/**
+ * `store` keeps the sheet and its undo history across remounts (the App owns it, so leaving the Editor screen
+ * and coming back keeps your work); without it the Editor makes its own.
+ */
+export function Editor({
+  profile,
+  session,
+  rowColors = DEFAULT_ROW_COLOR_PROFILE,
+  store: given,
+}: {
+  profile: GameProfile;
+  session: AudioSession;
+  rowColors?: string;
+  store?: EditorStore;
+}) {
+  const [own] = useState<EditorStore | null>(() => (given ? null : createEditorStore(profile)));
+  const store = given ?? own!;
   const sheet = useEditor(store, (s) => s.sheet);
   const transport = useStore(session.store, (s) => s.transport);
   const playhead = useStore(session.store, (s) => s.playhead);

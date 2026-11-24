@@ -5,6 +5,7 @@ import { firstRunDone } from './firstRunFlag.ts';
 import { parseGameProfile } from '../core/profile/schema.ts';
 import type { GameProfile } from '../core/profile/schema.ts';
 import { Editor } from '../editor/Editor.tsx';
+import { createEditorStore } from '../editor/store.ts';
 import { DEFAULT_ROW_COLOR_PROFILE, rowColorProfile } from '../editor/view/rowColors.ts';
 import { SettingsPanel } from './SettingsPanel.tsx';
 import { useRoute } from './router.ts';
@@ -69,6 +70,8 @@ export function App() {
   const [showFirstRun, setShowFirstRun] = useState(() => !firstRunDone());
   const profile = load.state === 'ready' ? load.profile : null;
   const session = useMemo(() => (profile ? new AudioSession(profile) : null), [profile]);
+  // One editor store for the whole visit, so going to another screen and back keeps the sheet and its undo history.
+  const editorStore = useMemo(() => (profile ? createEditorStore(profile) : null), [profile]);
   useEffect(() => {
     void session?.init();
   }, [session]);
@@ -111,7 +114,7 @@ export function App() {
         </div>
       )}
       {load.state === 'ready' && session && showFirstRun && <FirstRun session={session} onDone={() => setShowFirstRun(false)} />}
-      {load.state === 'ready' && session && !showFirstRun && route.screen === 'editor' && <Editor profile={load.profile} session={session} rowColors={rowColors} />}
+      {load.state === 'ready' && session && !showFirstRun && route.screen === 'editor' && editorStore && <Editor profile={load.profile} session={session} rowColors={rowColors} store={editorStore} />}
       {load.state === 'ready' && !showFirstRun && route.screen === 'projects' && <ProjectsScreen store={getStore()} onOpen={openProject} />}
       {load.state === 'ready' && !showFirstRun && route.screen === 'analysis' && (
         <AnalysisScreen key={route.id} store={getStore()} projectId={route.id} notice={notice} onAnalysed={onAnalysed} />
