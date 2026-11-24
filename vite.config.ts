@@ -13,6 +13,7 @@ const isolationHeaders = {
 export default defineConfig({
   base: '/music_to_sheets/',
   plugins: [react(), tailwindcss()],
+  worker: { format: 'es' },
   server: { headers: isolationHeaders },
   preview: { headers: isolationHeaders },
   test: {
