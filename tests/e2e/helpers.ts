@@ -18,13 +18,22 @@ export interface MtsHooks {
     getSongName(): string | null;
     getLastImport(): { issues: number; skipped: number; warnings: number; supported: boolean } | null;
   };
+  __mtsAnalysis?: {
+    getProjectId(): string;
+    getGrid(): { beats: number[]; downbeats: number[]; meter: string } | null;
+    getTempo(): number | null;
+    getCorrections(): unknown[];
+    getPlayback(): { playing: boolean; contextState: string | null; songTime: number | null; clicksScheduled: number; downbeatClicks: number };
+    getAnalysisState(): 'idle' | 'running' | 'done' | 'cancelled' | 'error';
+    getView(): { start: number; secPerPx: number };
+  };
   __mtsView?: { cellToClient(c: number, r: number): { x: number; y: number }; getViewport(): { cellSize: number; scrollCol: number } };
 }
 
 /** Opens the editor directly (the first-run screen already finished). */
 export async function openEditor(page: Page): Promise<void> {
   await page.addInitScript(() => localStorage.setItem('mts.firstRunDone', 'yes'));
-  await page.goto('./');
+  await page.goto('./#/editor');
   await page.getByTestId('strip-canvas').waitFor();
   await page.waitForFunction(() => (globalThis as unknown as MtsHooks).__mtsTest !== undefined && (globalThis as unknown as MtsHooks).__mtsView !== undefined);
 }
