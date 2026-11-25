@@ -2,10 +2,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ProjectStore } from '../storage/projects.ts';
 import { createAutosave } from '../storage/projects.ts';
 import type { Autosave } from '../storage/projects.ts';
+import { activeTracker, withTracker } from '../core/project/schema.ts';
 import type { Project } from '../core/project/schema.ts';
 import type { WaveformPeaks } from '../core/analysis/peaks.ts';
-import { DEFAULT_ANALYSIS_SETTINGS, DRIFT_WARN_PERCENT } from '../core/analysis/types.ts';
-import type { Analysis, BeatGrid, Correction, StageProgress } from '../core/analysis/types.ts';
+import { BEAT_TRACKERS, DRIFT_WARN_PERCENT, settingsFor } from '../core/analysis/types.ts';
+import type { Analysis, BeatGrid, BeatTracker, Correction, StageProgress } from '../core/analysis/types.ts';
 import { analysisKey, gridTempo } from '../core/analysis/tempo.ts';
 import { applyCorrections, tapTempo } from '../core/analysis/corrections.ts';
 import { startAnalysis } from '../workers/analysisClient.ts';
@@ -18,6 +19,7 @@ import { addCorrection, emptyCorrections, redoCorrection, undoCorrection } from 
 import type { CorrectionState } from '../analysis/correctionState.ts';
 import { barCount, formatBpm, formatMeter } from '../analysis/format.ts';
 import { readyToAutoApply, startsNewSequence, TAP_IDLE_SECONDS } from '../analysis/taps.ts';
+import { fallbackNotice, stageLabel, TRACKER_BUTTON_LABELS, trackerInfoText } from '../analysis/trackerInfo.ts';
 import { ProgressBar } from '../ui/ProgressBar.tsx';
 
 type RunState = 'idle' | 'running' | 'done' | 'cancelled' | 'error';
@@ -65,14 +67,17 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
   const [colsPerBeat, setColsPerBeat] = useState(4);
   const [clickVol, setClickVol] = useState(0.7); // facts-ok: default volume
   const [songVol, setSongVol] = useState(1);
+  const [fallbackReason, setFallbackReason] = useState<string | null>(null);
+  /** The tracker the last load or run was for (the Run analysis button after a cancel retries it). */
+  const [target, setTarget] = useState<BeatTracker | null>(null);
 
   const durationSec = analysis?.durationSec ?? project?.source.durationSec ?? 0;
   const grid: BeatGrid | null = useMemo(() => (analysis ? applyCorrections(analysis.grid, cs.corrections, analysis.durationSec) : null), [analysis, cs.corrections]);
 
   // Latest values for callbacks that outlive a render (player clock, key handlers, hooks, autosave).
-  const live = useRef({ project, analysis, grid, cs, view, width, playhead, runState, durationSec, pickBeat });
+  const live = useRef({ project, analysis, grid, cs, view, width, playhead, runState, durationSec, pickBeat, fallbackReason });
   useLayoutEffect(() => {
-    live.current = { project, analysis, grid, cs, view, width, playhead, runState, durationSec, pickBeat };
+    live.current = { project, analysis, grid, cs, view, width, playhead, runState, durationSec, pickBeat, fallbackReason };
   });
 
   const autosave = useRef<Autosave<Project> | null>(null);
@@ -106,7 +111,10 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
       const { project: p, analysis: a } = live.current;
       if (!p || !a) return;
       const effective = applyCorrections(a.grid, next.corrections, a.durationSec);
-      const updated: Project = { ...p, corrections: next.corrections, tempoBpm: effective.beats.length > 1 ? gridTempo(effective.beats) : a.tempoBpm };
+      const updated: Project = {
+        ...withTracker(p, p.tracker, { ...activeTracker(p), corrections: next.corrections }),
+        tempoBpm: effective.beats.length > 1 ? gridTempo(effective.beats) : a.tempoBpm,
+      };
       setProject(updated);
       live.current.project = updated;
       save(updated);
@@ -118,29 +126,60 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
   const undo = useCallback(() => applyCorrectionState(undoCorrection(live.current.cs)), [applyCorrectionState]);
   const redo = useCallback(() => applyCorrectionState(redoCorrection(live.current.cs)), [applyCorrectionState]);
 
-  const runAnalysis = useCallback(
-    async (p: Project, clearCorrections: boolean) => {
-      setRunState('running');
+  /** Shows a finished analysis: restores its tracker's corrections, makes that tracker the project's and saves. */
+  const show = useCallback(
+    async (p: Project, result: Analysis, corrections: Correction[], reason: string | null) => {
+      const tracker = result.settings.tracker;
+      const effective = applyCorrections(result.grid, corrections, result.durationSec);
+      const updated: Project = {
+        ...withTracker(p, tracker, { analysisKey: result.key, corrections }),
+        tracker,
+        tempoBpm: effective.beats.length > 1 ? gridTempo(effective.beats) : result.tempoBpm,
+      };
+      await store.save(updated);
+      live.current.project = updated;
+      setProject(updated);
+      setAnalysis(result);
+      setCs(emptyCorrections(corrections));
+      setFallbackReason(reason);
+      setRunState('done');
+      setProgress(null);
+      onAnalysed(p.id, true);
+    },
+    [store, onAnalysed],
+  );
+
+  /**
+   * Shows `tracker`'s grid: its cached analysis (the project's key, else the key another project for the same song
+   * made), or a run. `force` re-runs and, with `clear`, drops that tracker's corrections. A Beat This! run that
+   * falls back to DSP is stored under the DSP tracker only. Resolves true when the cached analysis was shown
+   * (no run), so a caller can carry on playing.
+   */
+  const load = useCallback(
+    async (p: Project, tracker: BeatTracker, force: boolean, clear: boolean): Promise<boolean> => {
+      setTarget(tracker);
       setError(null);
-      setProgress({ stage: 'decode', fraction: 0, etaSeconds: null });
       try {
+        if (!force) {
+          const state = p.trackers[tracker];
+          const cached = await store.getAnalysis(state.analysisKey ?? analysisKey(p.source.sha256, settingsFor(tracker)));
+          if (cached) {
+            await show(p, cached, state.corrections, null);
+            return true;
+          }
+        }
+        setRunState('running');
+        setProgress({ stage: 'decode', fraction: 0, etaSeconds: null });
         const mono = await store.loadMono(p);
-        const j = startAnalysis(mono, p.source.sha256, DEFAULT_ANALYSIS_SETTINGS, setProgress);
+        const modelUrl = localStorage.getItem('mts.test.modelUrl') ?? undefined; // test hook: point the worker at another model file
+        const j = startAnalysis(mono, p.source.sha256, settingsFor(tracker), setProgress, { modelUrl });
         job.current = j;
-        const result = await j.promise;
+        const { analysis: result, fallbackReason: reason } = await j.promise;
         job.current = null;
         await store.putAnalysis(result);
-        const corrections = clearCorrections ? [] : p.corrections;
-        const effective = applyCorrections(result.grid, corrections, result.durationSec);
-        const updated: Project = { ...p, analysisKey: result.key, tempoBpm: effective.beats.length > 1 ? gridTempo(effective.beats) : result.tempoBpm, corrections };
-        await store.save(updated);
-        live.current.project = updated;
-        setProject(updated);
-        setAnalysis(result);
-        setCs(emptyCorrections(corrections));
-        setRunState('done');
-        setProgress(null);
-        onAnalysed(p.id, true);
+        const made = result.settings.tracker;
+        const corrections = clear && made === tracker ? [] : p.trackers[made].corrections;
+        await show(p, result, corrections, reason);
       } catch (e) {
         job.current = null;
         setProgress(null);
@@ -150,8 +189,9 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
           setError(e instanceof Error ? e.message : String(e));
         }
       }
+      return false;
     },
-    [store, onAnalysed],
+    [store, show],
   );
 
   // Load the project, its peaks and its analysis (run it when missing).
@@ -169,17 +209,9 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
         setProject(p);
         live.current.project = p;
         setPeaks(await store.getPeaks(p));
-        const a = await store.getAnalysis(p.analysisKey ?? analysisKey(p.source.sha256, DEFAULT_ANALYSIS_SETTINGS));
         if (cancelled) return;
-        if (a) {
-          setAnalysis(a);
-          setCs(emptyCorrections(p.corrections));
-          setRunState('done');
-          onAnalysed(p.id, true);
-        } else {
-          onAnalysed(p.id, false);
-          await runAnalysis(p, false);
-        }
+        onAnalysed(p.id, activeTracker(p).analysisKey !== null);
+        await load(p, p.tracker, false, false);
       } catch (e) {
         if (cancelled) return;
         setRunState('error');
@@ -191,7 +223,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
       job.current?.cancel();
       job.current = null;
     };
-  }, [store, projectId, runAnalysis, onAnalysed]);
+  }, [store, projectId, load, onAnalysed]);
 
   // Leaving the screen stops playback and writes pending corrections.
   useEffect(() => {
@@ -235,10 +267,10 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
     return () => cancelAnimationFrame(raf);
   }, [playing]);
 
-  const play = useCallback(async () => {
+  const play = useCallback(async (resumeAt?: number) => {
     const p = getPlayer();
     p.ensureContext();
-    const from = live.current.playhead >= live.current.durationSec - 0.05 ? 0 : live.current.playhead; // facts-ok: seconds
+    const from = resumeAt ?? (live.current.playhead >= live.current.durationSec - 0.05 ? 0 : live.current.playhead); // facts-ok: seconds
     await p.play(from);
     setPlaying(true);
   }, [getPlayer]);
@@ -321,6 +353,10 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
       getPlayback: () => player.current?.stats() ?? { playing: false, contextState: null, songTime: null, clicksScheduled: 0, downbeatClicks: 0, subClicks: 0 },
       getAnalysisState: () => live.current.runState,
       getView: () => live.current.view,
+      getTracker: () => live.current.analysis?.settings.tracker ?? null,
+      getBackend: () => live.current.analysis?.backend ?? null,
+      getFallbackReason: () => live.current.fallbackReason,
+      getElapsedMs: () => live.current.analysis?.elapsedMs ?? null,
     };
     return () => {
       delete window.__mtsAnalysis;
@@ -336,7 +372,20 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
   const rerun = () => {
     setConfirmRerun(false);
     stop();
-    if (project) void runAnalysis(project, true);
+    const p = live.current.project;
+    if (p) void load(p, p.tracker, true, true);
+  };
+  const switchTracker = (tracker: BeatTracker) => {
+    const p = live.current.project;
+    if (!p || live.current.runState === 'running') return;
+    // Playing and the other grid is cached: carry on from the same spot so the two can be compared by ear.
+    const was = player.current?.isPlaying() ? player.current.position() : null;
+    stop();
+    setConfirmRerun(false);
+    void autosave.current?.flush();
+    void load(p, tracker, false, false).then((cached) => {
+      if (cached && was !== null && live.current.grid) void play(was);
+    });
   };
 
   const ready = grid !== null && analysis !== null;
@@ -355,11 +404,34 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
           <ProgressBar
             testId="analysis-progress"
             fraction={progress?.fraction ?? 0}
-            label={`Analysing: ${progress?.stage ?? 'starting'}${progress?.etaSeconds != null ? `, about ${Math.max(1, Math.round(progress.etaSeconds))} s left` : ''}`}
+            label={`Analysing: ${stageLabel(progress?.stage)}${progress?.etaSeconds != null ? `, about ${Math.max(1, Math.round(progress.etaSeconds))} s left` : ''}`}
           />
           <button type="button" data-testid="cancel-analysis" className={button} onClick={() => job.current?.cancel()}>
             Cancel
           </button>
+        </div>
+      )}
+      {fallbackReason !== null && runState !== 'running' && (
+        <p data-testid="tracker-fallback" role="status" className="rounded border border-amber-700 bg-amber-950 p-2 text-sm text-amber-100">
+          {fallbackNotice(fallbackReason)}
+        </p>
+      )}
+      {project && (analysis || runState === 'running') && (
+        <div data-testid="tracker-switch" role="group" aria-label="Beat tracker" className="flex items-center gap-2 text-sm">
+          <span className="text-slate-400">Beat tracker</span>
+          {BEAT_TRACKERS.map((t) => (
+            <button
+              key={t}
+              type="button"
+              data-testid={`tracker-${t}`}
+              aria-pressed={project.tracker === t}
+              disabled={runState === 'running'}
+              className={`${button} ${project.tracker === t ? 'ring-2 ring-sky-500' : ''}`}
+              onClick={() => switchTracker(t)}
+            >
+              {TRACKER_BUTTON_LABELS[t]}
+            </button>
+          ))}
         </div>
       )}
       {(runState === 'cancelled' || runState === 'error') && (
@@ -371,7 +443,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
           )}
           {runState === 'cancelled' && <p className="text-slate-400">Analysis cancelled.</p>}
           {project && (
-            <button type="button" data-testid="run-analysis" className="rounded bg-sky-700 px-4 py-2 hover:bg-sky-600" onClick={() => void runAnalysis(project, false)}>
+            <button type="button" data-testid="run-analysis" className="rounded bg-sky-700 px-4 py-2 hover:bg-sky-600" onClick={() => void load(project, target ?? project.tracker, false, false)}>
               Run analysis
             </button>
           )}
@@ -381,6 +453,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
       {ready && (
         <>
           <section data-testid="analysis-info" className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+            <span data-testid="tracker-info">{trackerInfoText(analysis)}</span>
             <span>Tempo: {formatBpm(tempo)}</span>
             <span>Meter: {formatMeter(grid)}</span>
             <span>

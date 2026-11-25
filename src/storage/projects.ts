@@ -5,10 +5,10 @@
  */
 import type { Analysis, ProgressCallback } from '../core/analysis/types.ts';
 import type { WaveformPeaks } from '../core/analysis/peaks.ts';
-import { analysisSchema, importExtension, parseProject, SOURCES_FOLDER, sourceFileNames } from '../core/project/schema.ts';
+import { analysisSchema, emptyTrackers, importExtension, parseProject, PROJECT_SCHEMA_VERSION, SOURCES_FOLDER, sourceFileNames } from '../core/project/schema.ts';
 import type { Project } from '../core/project/schema.ts';
 import { computePeaks } from '../core/analysis/peaks.ts';
-import { ANALYSIS_SAMPLE_RATE } from '../core/analysis/types.ts';
+import { ANALYSIS_SAMPLE_RATE, BEAT_TRACKERS, DEFAULT_TRACKER } from '../core/analysis/types.ts';
 import { decodeSong, ImportError } from '../audio/decode.ts';
 import type { DecodedSong } from '../audio/decode.ts';
 import * as opfs from '../audio/opfs.ts';
@@ -158,14 +158,14 @@ export function createProjectStore(overrides?: Partial<StoreDeps>): ProjectStore
         if (duplicate === 'new') {
           const now = d.now();
           const copy = parseProject({
-            schemaVersion: 1,
+            schemaVersion: PROJECT_SCHEMA_VERSION,
             id: d.uuid(),
             meta: { name: `${file.name.replace(/\.[^.]+$/, '')} (${matches.length + 1})`, createdAt: now, updatedAt: now, lastOpenedAt: now },
             source: first.source,
             peaksKey: first.peaksKey,
-            analysisKey: null,
+            tracker: DEFAULT_TRACKER,
+            trackers: emptyTrackers(),
             tempoBpm: null,
-            corrections: [],
           });
           await db.projects.put({ ...copy });
           report('done', 1);
@@ -199,7 +199,7 @@ export function createProjectStore(overrides?: Partial<StoreDeps>): ProjectStore
         const peaks = computePeaks(decoded.mono, ANALYSIS_SAMPLE_RATE);
         const now = d.now();
         const valid = parseProject({
-          schemaVersion: 1,
+          schemaVersion: PROJECT_SCHEMA_VERSION,
           id: d.uuid(),
           meta: { name: file.name.replace(/\.[^.]+$/, ''), createdAt: now, updatedAt: now, lastOpenedAt: now },
           source: {
@@ -212,9 +212,9 @@ export function createProjectStore(overrides?: Partial<StoreDeps>): ProjectStore
             channels: decoded.channels,
           },
           peaksKey: `peaks:${sha}`,
-          analysisKey: null,
+          tracker: DEFAULT_TRACKER,
+          trackers: emptyTrackers(),
           tempoBpm: null,
-          corrections: [],
         });
         await db.transaction('rw', db.projects, db.artifacts, async () => {
           await db.artifacts.put({ key: valid.peaksKey, kind: 'peaks', data: peaks, createdAt: now });
@@ -247,9 +247,13 @@ export function createProjectStore(overrides?: Partial<StoreDeps>): ProjectStore
       await db.transaction('rw', db.projects, db.artifacts, async () => {
         await db.projects.delete(id);
         if (!p) return;
-        const others = await db.projects.where('source.sha256').equals(p.source.sha256).toArray();
-        // Projects for the same song share the analysis (same key) and the peaks: keep them while one still uses them.
-        if (p.analysisKey && !others.some((o) => o.analysisKey === p.analysisKey)) await db.artifacts.delete(p.analysisKey);
+        const others = (await db.projects.where('source.sha256').equals(p.source.sha256).toArray()).map(parseRow).filter((o): o is Project => o !== null);
+        // Projects for the same song share the analyses (same keys) and the peaks: keep them while one still uses them.
+        const used = new Set(others.flatMap((o) => BEAT_TRACKERS.map((t) => o.trackers[t].analysisKey)));
+        for (const t of BEAT_TRACKERS) {
+          const key = p.trackers[t].analysisKey;
+          if (key && !used.has(key)) await db.artifacts.delete(key);
+        }
         if (others.length === 0) await db.artifacts.delete(p.peaksKey);
       });
       if (!p) return;

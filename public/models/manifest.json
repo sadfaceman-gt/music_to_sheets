@@ -1,1 +1,15 @@
-{ "version": 1, "models": [] }
+{
+  "version": 1,
+  "models": [
+    {
+      "id": "beatthis-small0",
+      "file": "beat_this_small0.onnx",
+      "sha256": "0cc85144c954418353ee79d87c22be81b5d61dddf6a8333a5a6c1a54cb752014",
+      "bytes": 11258800,
+      "input": { "name": "spect", "shape": [1, 1500, 128] },
+      "outputs": ["beat", "downbeat"],
+      "source": "Beat This! small0 checkpoint (CPJKU/beat_this, MIT), exported by tools/beat-this/ship.py (torch 2.15, opset 18)",
+      "license": "MIT"
+    }
+  ]
+}

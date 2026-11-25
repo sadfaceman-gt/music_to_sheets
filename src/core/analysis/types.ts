@@ -4,14 +4,32 @@
  * Pure data: no DOM, so it crosses the worker boundary and is stored in IndexedDB as is.
  */
 
-/** Bump when the DSP output changes for the same input, so cached analyses are recomputed. */
-export const ANALYSIS_VERSION = 1;
+/**
+ * Bump when the output changes for the same input, so cached analyses are recomputed.
+ * 2 (M2b): settings gained `tracker`, Analysis gained `backend`.
+ */
+export const ANALYSIS_VERSION = 2;
 
 /** Sample rate of the mono analysis copy (Design 5.1). */
 export const ANALYSIS_SAMPLE_RATE = 22050;
 
-/** Settings that change the DSP result. Part of the cache key (Design 3.4). */
+/**
+ * Which beat tracker made a grid (Design 5.2): our ONNX export of Beat This! small0 (the default), or the M2a DSP
+ * tracker (the fallback when the model can't load or run, and a choice on the analysis screen).
+ */
+export type BeatTracker = 'beatthis-small0' | 'dsp';
+export const BEAT_TRACKERS: readonly BeatTracker[] = ['beatthis-small0', 'dsp'];
+export const DEFAULT_TRACKER: BeatTracker = 'beatthis-small0';
+
+/** Where Beat This! ran: onnxruntime-web on WebGPU, or on WASM (threaded when cross-origin isolated). */
+export type InferenceBackend = 'webgpu' | 'wasm';
+
+/**
+ * Settings that change the result. Part of the cache key (Design 3.4), so each tracker has its own cached analysis.
+ * The DSP fields below apply to the DSP tracker only; Beat This! ignores them.
+ */
 export interface AnalysisSettings {
+  tracker: BeatTracker;
   /** STFT frame and hop in samples at ANALYSIS_SAMPLE_RATE. */
   fftSize: number;
   hopSize: number;
@@ -27,6 +45,7 @@ export interface AnalysisSettings {
 }
 
 export const DEFAULT_ANALYSIS_SETTINGS: AnalysisSettings = {
+  tracker: DEFAULT_TRACKER,
   fftSize: 2048,
   hopSize: 512,
   tempoPriorBpm: 120,
@@ -87,7 +106,12 @@ export interface SectionSpan {
   confidence: number;
 }
 
-/** The detected analysis, as the DSP produced it (before the user's corrections). */
+/** The settings for one tracker (the defaults otherwise). */
+export function settingsFor(tracker: BeatTracker, base: AnalysisSettings = DEFAULT_ANALYSIS_SETTINGS): AnalysisSettings {
+  return { ...base, tracker };
+}
+
+/** The detected analysis, as the tracker produced it (before the user's corrections). */
 export interface Analysis {
   version: typeof ANALYSIS_VERSION;
   /** Cache key: analysisKey(sourceSha256, settings). */
@@ -106,6 +130,8 @@ export interface Analysis {
   sections: SectionSpan[];
   /** Wall-clock milliseconds the analysis took, for the performance target (Design 15.3). */
   elapsedMs: number;
+  /** Where Beat This! ran; null for the DSP tracker. */
+  backend: InferenceBackend | null;
 }
 
 /** Drift over 3% shows a warning that output will be time-warped to a fixed grid (Design 5.2). */
@@ -128,7 +154,8 @@ export type Correction =
 
 /** Progress a worker reports (Design 3.4). */
 export interface StageProgress {
-  stage: 'decode' | 'onset' | 'tempo' | 'beats' | 'downbeats' | 'done';
+  /** model: download, hash check and session start (Beat This!); spectrogram and inference: Beat This!'s front end and windows. */
+  stage: 'decode' | 'model' | 'spectrogram' | 'inference' | 'onset' | 'tempo' | 'beats' | 'downbeats' | 'done';
   /** 0..1 over the whole job. */
   fraction: number;
   /** Estimated seconds left, or null while unknown. */

@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { ana } from './helpers.ts';
-import { song34, song44 } from './songs.ts';
+import { makeSong, song34, song44 } from './songs.ts';
 import type { UploadFile } from './media.ts';
 
 async function openSong(page: Page, song: UploadFile) {
@@ -23,8 +23,15 @@ test('4/4 song: about 40 beats, a downbeat every 4', async ({ page }) => {
   expect(g.meter).toBe('4/4');
 });
 
-test('3/4 song: a downbeat every 3', async ({ page }) => {
+test('3/4 song: a downbeat every 3 (DSP tracker); Beat This! also reads 3/4', async ({ page }) => {
   await openSong(page, song34());
+  // Beat This! (the default) gets the meter; on this 20 s click track it may misplace a single downbeat.
+  expect(await ana.tracker(page)).toBe('beatthis-small0');
+  expect((await gridOf(page)).meter).toBe('3/4');
+  // The M2a check of every downbeat runs on the DSP tracker it was written for.
+  await page.getByTestId('tracker-dsp').click();
+  await expect(page.getByTestId('tracker-dsp')).toHaveAttribute('aria-pressed', 'true');
+  await ana.waitDone(page);
   const g = await gridOf(page);
   for (let i = 1; i < g.downbeats.length; i++) expect(g.downbeats[i]! - g.downbeats[i - 1]!).toBe(3);
   expect(g.meter).toBe('3/4');
@@ -99,11 +106,11 @@ test('plays the song with a click track', async ({ page }) => {
   await openSong(page, song44());
   await page.getByTestId('play-song').click();
   await expect.poll(async () => (await ana.playback(page)).playing).toBe(true);
-  await page.waitForTimeout(1500);
+  // CI's audio clock can start slowly (null sink); wait for it instead of sampling once at a fixed time.
+  await expect.poll(async () => (await ana.playback(page)).contextState, { timeout: 10_000 }).toBe('running');
+  await expect.poll(async () => (await ana.playback(page)).downbeatClicks, { timeout: 10_000 }).toBeGreaterThan(0);
   const a = await ana.playback(page);
-  expect(a.contextState).toBe('running');
   expect(a.clicksScheduled).toBeGreaterThan(0);
-  expect(a.downbeatClicks).toBeGreaterThan(0);
   await page.waitForTimeout(1000);
   const b = await ana.playback(page);
   expect(b.songTime!).toBeGreaterThan(a.songTime!);
@@ -117,7 +124,9 @@ test('column clicks add fainter clicks between the beats', async ({ page }) => {
   await page.getByTestId('columns-per-beat').selectOption('2');
   await page.getByTestId('column-click-toggle').check();
   await page.getByTestId('play-song').click();
-  await page.waitForTimeout(2000);
+  // CI's null sink starts the audio clock slowly: wait for it and the first sub-clicks instead of a fixed delay.
+  await expect.poll(async () => (await ana.playback(page)).contextState, { timeout: 10_000 }).toBe('running');
+  await expect.poll(async () => (await ana.playback(page)).subClicks, { timeout: 10_000 }).toBeGreaterThan(0);
   const a = await ana.playback(page);
   expect(a.subClicks).toBeGreaterThan(0);
   expect(a.subClicks).toBeGreaterThanOrEqual(a.clicksScheduled - 2);
@@ -147,7 +156,9 @@ test('re-run asks first and clears the corrections', async ({ page }) => {
 test('cancelling the analysis leaves a Run analysis button', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('mts.firstRunDone', 'yes'));
   await page.goto('./');
-  await page.getByTestId('import-input').setInputFiles(song44());
-  await page.getByTestId('cancel-analysis').click({ timeout: 30_000 });
+  // A long song, so the analysis is still running when Cancel is clicked.
+  const long: UploadFile = { name: 'long.wav', mimeType: 'audio/wav', buffer: makeSong({ bpm: 120, beatsPerBar: 4, seconds: 300 }) };
+  await page.getByTestId('import-input').setInputFiles(long);
+  await page.getByTestId('cancel-analysis').click({ timeout: 60_000 });
   await expect(page.getByTestId('run-analysis')).toBeVisible();
 });

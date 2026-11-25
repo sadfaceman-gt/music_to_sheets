@@ -9,24 +9,48 @@ function median(xs: number[]): number {
   return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
 }
 
-/** Global tempo of a grid: 60 / median inter-beat interval. 0 for fewer than two beats. */
+/** Gaps within this ratio of the median count towards the mean (frame-quantised beats alternate around the true gap). */
+const NEAR_MEDIAN = 0.12; // facts-ok: ratio
+
+/**
+ * Typical inter-beat interval: the mean of the intervals within NEAR_MEDIAN of their median. A plain median snaps to
+ * one of two quantised values when beats sit on a frame grid (Beat This! at 50 fps: 22 and 23 frames give 136.4 or
+ * 130.4 BPM for a 133 BPM song); the mean of the near-median intervals lands between them. Gaps (breaks, missed
+ * beats) and level changes stay out of the mean.
+ */
+function typicalInterval(ibis: number[]): number {
+  const m = median(ibis);
+  if (m <= 0) return 0;
+  let sum = 0;
+  let n = 0;
+  for (const x of ibis) {
+    if (Math.abs(x / m - 1) <= NEAR_MEDIAN) {
+      sum += x;
+      n++;
+    }
+  }
+  return n > 0 ? sum / n : m;
+}
+
+/** Global tempo of a grid: 60 / typical inter-beat interval. 0 for fewer than two beats. */
 export function gridTempo(beats: number[]): number {
   const ibis: number[] = [];
   for (let i = 1; i < beats.length; i++) ibis.push(beats[i]! - beats[i - 1]!);
-  const m = median(ibis);
+  const m = typicalInterval(ibis);
   return m > 0 ? 60 / m : 0;
 }
 
 /**
- * Local tempo per beat: 60 / inter-beat interval, smoothed with a running median over `window` intervals
- * (odd; default 9) so a single misplaced beat doesn't read as a tempo change. One point per beat except the last.
+ * Local tempo per beat: 60 / typical inter-beat interval over a running window of `window` intervals (odd;
+ * default 9), so a single misplaced beat or frame quantisation doesn't read as a tempo change. One point per beat
+ * except the last.
  */
 export function tempoCurve(beats: number[], window = 9): TempoPoint[] {
   const ibis: number[] = [];
   for (let i = 1; i < beats.length; i++) ibis.push(beats[i]! - beats[i - 1]!);
   const half = Math.max(0, Math.floor(window / 2));
   return ibis.map((_, i) => {
-    const m = median(ibis.slice(Math.max(0, i - half), Math.min(ibis.length, i + half + 1)));
+    const m = typicalInterval(ibis.slice(Math.max(0, i - half), Math.min(ibis.length, i + half + 1)));
     return { time: beats[i]!, bpm: m > 0 ? 60 / m : 0 };
   });
 }
@@ -56,9 +80,9 @@ export function fnv1a(text: string): string {
   return (h >>> 0).toString(16).padStart(8, '0');
 }
 
-/** Cache key of an analysis: the source's SHA-256, the analysis version and a hash of the settings (Design 3.4). */
+/** Cache key of an analysis: the source's SHA-256, the analysis version, the tracker and a hash of the settings (Design 3.4). */
 export function analysisKey(sourceSha256: string, settings: AnalysisSettings): string {
   const keys = Object.keys(settings).sort() as (keyof AnalysisSettings)[];
   const canonical = keys.map((k) => `${k}=${settings[k]}`).join(';');
-  return `analysis:${sourceSha256}:v${ANALYSIS_VERSION}:${fnv1a(canonical)}`;
+  return `analysis:${sourceSha256}:v${ANALYSIS_VERSION}:${settings.tracker}:${fnv1a(canonical)}`;
 }

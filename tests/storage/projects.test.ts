@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ImportError } from '../../src/audio/decode.ts';
 import type { DecodedSong } from '../../src/audio/decode.ts';
 import { analysisKey } from '../../src/core/analysis/tempo.ts';
-import { ANALYSIS_VERSION, DEFAULT_ANALYSIS_SETTINGS } from '../../src/core/analysis/types.ts';
+import { ANALYSIS_VERSION, DEFAULT_ANALYSIS_SETTINGS, settingsFor } from '../../src/core/analysis/types.ts';
 import type { Analysis } from '../../src/core/analysis/types.ts';
 import { SOURCES_FOLDER, sourceFileNames } from '../../src/core/project/schema.ts';
 import { MtsDb } from '../../src/storage/db.ts';
@@ -81,6 +81,7 @@ function analysisFor(sha: string): Analysis {
     chords: [],
     sections: [],
     elapsedMs: 5,
+    backend: null,
   };
 }
 
@@ -93,7 +94,9 @@ describe('importFile', () => {
     const { project, existing } = await store.importFile(song('My Song.mp3', 'abc'), (p) => stages.push(p.fraction));
     expect(existing).toBe(false);
     expect(project.meta.name).toBe('My Song');
-    expect(project.analysisKey).toBeNull();
+    expect(project.trackers['beatthis-small0'].analysisKey).toBeNull();
+    expect(project.trackers.dsp.analysisKey).toBeNull();
+    expect(project.tracker).toBe('beatthis-small0');
     expect(stages).toEqual([0.1, 0.6, 0.9, 1]);
     const names = sourceFileNames(project.source.sha256, 'mp3');
     expect([...o.files.keys()].sort()).toEqual([names.original, names.stereo, names.mono].map((x) => `${SOURCES_FOLDER}/${x}`).sort());
@@ -138,7 +141,7 @@ describe('importFile', () => {
     expect(second.project.id).not.toBe(first.id);
     expect(second.project.meta.name).toBe('a (2)');
     expect(second.project.source).toEqual(first.source);
-    expect(second.project.analysisKey).toBeNull();
+    expect(second.project.trackers['beatthis-small0'].analysisKey).toBeNull();
     expect(decode).toHaveBeenCalledTimes(1);
     expect(o.files.size).toBe(files);
     expect((await store.list()).length).toBe(2);
@@ -205,9 +208,9 @@ describe('save, open, list', () => {
     const opened = await store.open(a.id);
     expect(opened!.meta.lastOpenedAt).toBeGreaterThan(b.meta.lastOpenedAt);
     expect((await store.list()).map((p) => p.id)).toEqual([a.id, b.id]);
-    await store.save({ ...a, corrections: [{ kind: 'double' }], tempoBpm: 100 });
+    await store.save({ ...a, trackers: { ...a.trackers, 'beatthis-small0': { analysisKey: null, corrections: [{ kind: 'double' }] } }, tempoBpm: 100 });
     const saved = (await store.get(a.id))!;
-    expect(saved.corrections).toEqual([{ kind: 'double' }]);
+    expect(saved.trackers['beatthis-small0'].corrections).toEqual([{ kind: 'double' }]);
     expect(saved.meta.updatedAt).toBeGreaterThan(a.meta.updatedAt);
     expect(await store.open('missing')).toBeNull();
   });
@@ -235,7 +238,7 @@ describe('delete', () => {
     const { store, o, db } = setup();
     const p = (await store.importFile(song('a.mp3', 'a'))).project;
     await store.putAnalysis(analysisFor(p.source.sha256));
-    await store.save({ ...p, analysisKey: analysisFor(p.source.sha256).key });
+    await store.save({ ...p, trackers: { ...p.trackers, 'beatthis-small0': { analysisKey: analysisFor(p.source.sha256).key, corrections: [] } } });
     await store.delete(p.id);
     expect(await store.list()).toEqual([]);
     expect(o.files.size).toBe(0);
@@ -260,13 +263,90 @@ describe('delete', () => {
     const a = (await store.importFile(song('a.mp3', 'a'))).project;
     const analysis = analysisFor(a.source.sha256);
     await store.putAnalysis(analysis);
-    await store.save({ ...a, analysisKey: analysis.key });
+    await store.save({ ...a, trackers: { ...a.trackers, 'beatthis-small0': { analysisKey: analysis.key, corrections: [] } } });
     const b = (await store.importFile(song('a.mp3', 'a'), undefined, 'new')).project;
-    await store.save({ ...b, analysisKey: analysis.key });
+    await store.save({ ...b, trackers: { ...b.trackers, 'beatthis-small0': { analysisKey: analysis.key, corrections: [] } } });
     await store.delete(a.id);
     expect(await store.getAnalysis(analysis.key)).toEqual(analysis);
     await store.delete(b.id);
     expect(await db.artifacts.get(analysis.key)).toBeUndefined();
+  });
+
+  it('keeps both trackers analyses while another project uses them, then deletes them', async () => {
+    const { store, db } = setup();
+    const a = (await store.importFile(song('a.mp3', 'a'))).project;
+    const bt = analysisFor(a.source.sha256);
+    const dsp = { ...bt, settings: settingsFor('dsp'), key: analysisKey(a.source.sha256, settingsFor('dsp')), backend: null };
+    await store.putAnalysis(bt);
+    await store.putAnalysis(dsp);
+    const both = { ...a.trackers, 'beatthis-small0': { analysisKey: bt.key, corrections: [] }, dsp: { analysisKey: dsp.key, corrections: [] } };
+    await store.save({ ...a, trackers: both });
+    const b = (await store.importFile(song('a.mp3', 'a'), undefined, 'new')).project;
+    // b only ran the DSP tracker; a's Beat This! analysis is no longer used by anyone but a.
+    await store.save({ ...b, tracker: 'dsp', trackers: { ...b.trackers, dsp: { analysisKey: dsp.key, corrections: [] } } });
+    await store.delete(a.id);
+    expect(await db.artifacts.get(bt.key)).toBeUndefined();
+    expect(await db.artifacts.get(dsp.key)).toBeDefined();
+    await store.delete(b.id);
+    expect(await db.artifacts.get(dsp.key)).toBeUndefined();
+  });
+
+  it('keeps both analyses when the other project uses both', async () => {
+    const { store, db } = setup();
+    const a = (await store.importFile(song('a.mp3', 'a'))).project;
+    const bt = analysisFor(a.source.sha256);
+    const dsp = { ...bt, settings: settingsFor('dsp'), key: analysisKey(a.source.sha256, settingsFor('dsp')), backend: null };
+    await store.putAnalysis(bt);
+    await store.putAnalysis(dsp);
+    const both = { ...a.trackers, 'beatthis-small0': { analysisKey: bt.key, corrections: [] }, dsp: { analysisKey: dsp.key, corrections: [] } };
+    await store.save({ ...a, trackers: both });
+    const b = (await store.importFile(song('a.mp3', 'a'), undefined, 'new')).project;
+    await store.save({ ...b, trackers: both });
+    await store.delete(a.id);
+    expect(await db.artifacts.get(bt.key)).toBeDefined();
+    expect(await db.artifacts.get(dsp.key)).toBeDefined();
+  });
+});
+
+describe('schema v1 rows (cycle 4 projects)', () => {
+  beforeEach(() => vi.spyOn(console, 'warn').mockImplementation(() => undefined));
+
+  /** Rewrites a stored project as a cycle 4 (schema v1) record. */
+  async function asV1(db: MtsDb, id: string, corrections: unknown[]): Promise<void> {
+    const row = (await db.projects.get(id))!;
+    const { tracker: _t, trackers: _ts, ...rest } = row;
+    void _t;
+    void _ts;
+    await db.projects.put({ ...rest, schemaVersion: 1, analysisKey: 'v1-key', corrections });
+  }
+
+  it('opens a v1 row as v2 with its corrections on the DSP tracker, and rewrites it as v2 on save', async () => {
+    const { store, db } = setup();
+    const a = (await store.importFile(song('a.mp3', 'a'))).project;
+    const corrections = [{ kind: 'double' }];
+    await asV1(db, a.id, corrections);
+
+    const opened = (await store.open(a.id))!;
+    expect(opened.schemaVersion).toBe(2);
+    expect(opened.tracker).toBe('dsp');
+    expect(opened.trackers.dsp.corrections).toEqual(corrections);
+
+    await asV1(db, a.id, corrections);
+    await store.save(opened);
+    const raw = (await db.projects.get(a.id))!;
+    expect(raw.schemaVersion).toBe(2);
+    expect(raw).not.toHaveProperty('corrections');
+    expect((raw.trackers as { dsp: { corrections: unknown[] } }).dsp.corrections).toEqual(corrections);
+  });
+
+  it('lists and deletes with mixed v1 and v2 rows', async () => {
+    const { store, db } = setup();
+    const a = (await store.importFile(song('a.mp3', 'a'))).project;
+    const b = (await store.importFile(song('b.mp3', 'b'))).project;
+    await asV1(db, a.id, []);
+    expect((await store.list()).map((p) => p.schemaVersion)).toEqual([2, 2]);
+    await store.delete(a.id);
+    expect((await store.list()).map((p) => p.id)).toEqual([b.id]);
   });
 });
 
