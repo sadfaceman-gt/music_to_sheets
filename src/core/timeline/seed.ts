@@ -33,6 +33,14 @@ function tidy<T extends Span>(spans: readonly T[], dur: number): T[] {
     out.push({ ...s, start, end });
     prevEnd = end;
   }
+  // Detection covers the song between the first and last beat; the seeded rows cover all of it, so a fresh timeline has
+  // no gaps for Finish analysis to flag (the first chord used to start at the first beat, e.g. 0.26 s): the first block
+  // starts at 0, the last ends at durationSec, and a gap between two spans goes to the earlier one.
+  for (let i = 1; i < out.length; i++) if (out[i]!.start - out[i - 1]!.end > 0) out[i - 1] = { ...out[i - 1]!, end: out[i]!.start };
+  if (out.length > 0) {
+    out[0] = { ...out[0]!, start: 0 };
+    out[out.length - 1] = { ...out[out.length - 1]!, end: dur };
+  }
   return out;
 }
 

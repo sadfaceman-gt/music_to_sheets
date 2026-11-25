@@ -131,7 +131,7 @@ describe('seedTimeline', () => {
     checkShape(t);
     expect(names(t).chord).toEqual([
       [0, 12, 'G'],
-      [12, 20, 'C'],
+      [12, 25, 'C'],
       [25, 30, 'Am'],
     ]);
     expect(names(t).section).toEqual([
@@ -139,6 +139,15 @@ describe('seedTimeline', () => {
       [16, 30, 'chorus'],
     ]);
     for (const b of allBlocks(t)) expect(b.end).toBeLessThanOrEqual(30);
+  });
+
+  it('covers the whole song: the first block starts at 0 and the last ends at the song end (no gaps for Finish analysis)', () => {
+    const t = seedTimeline(analysis({ durationSec: 30, chords: [chord(0.26, 10, 7, 'maj'), chord(10, 29.5, 0, 'maj')], sections: [section(0.26, 29.5, 'verse')] }), beatGrid(30), null);
+    expect(names(t).chord).toEqual([
+      [0, 10, 'G'],
+      [10, 30, 'C'],
+    ]);
+    expect(names(t).section).toEqual([[0, 30, 'verse']]);
   });
 
   it('gives an empty timeline for an empty detection', () => {
