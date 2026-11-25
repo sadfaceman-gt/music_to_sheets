@@ -70,8 +70,10 @@ export function TimelineView({ timeline, selection, view, width, durationSec, sn
   }, [problems]);
 
   const local = (e: React.PointerEvent) => {
-    const r = wrapRef.current!.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+    const el = wrapRef.current!;
+    const r = el.getBoundingClientRect();
+    // Inside the border, where the rows and blocks are placed.
+    return { x: e.clientX - r.left - el.clientLeft, y: e.clientY - r.top - el.clientTop };
   };
   const timeAt = (x: number) => Math.max(0, Math.min(durationSec, xToTime(view, x)));
   const rowAt = (y: number): RowKind => ROWS[Math.max(0, Math.min(ROWS.length - 1, Math.floor(y / ROW_HEIGHT)))]!;

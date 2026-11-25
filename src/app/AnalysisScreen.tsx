@@ -64,9 +64,14 @@ const NUDGES = [
 const button = 'rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700 disabled:opacity-40';
 const NO_SELECTION: readonly number[] = [];
 
+/** Input types that don't take typing: shortcuts still work while one has the focus. */
+const NON_TEXT_INPUTS = ['checkbox', 'radio', 'range', 'button', 'submit', 'reset', 'color', 'file'];
+
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
-  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+  if (!el) return false;
+  if (el.tagName === 'INPUT') return !NON_TEXT_INPUTS.includes((el as HTMLInputElement).type);
+  return el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable;
 }
 
 export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinished }: Props) {
@@ -474,7 +479,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
         commit(r.timeline, r.selection);
         return;
       }
-      if (e.key === ' ' && !(e.target as HTMLElement).closest('button')) {
+      if (e.key === ' ' && !(e.target as HTMLElement).closest('button, input')) {
         e.preventDefault();
         togglePlay();
       } else if (e.key === 'Escape') {
