@@ -10,7 +10,9 @@ test/ref/<song>.beatthis-small0.json (beats, written by tools/beat-this/referenc
     chroma recurrence (kNN, 4-beat time-delay embedding) + MFCC path continuity, normalised Laplacian,
     k-means on the first k eigenvectors for k = 3..8; the chosen k is the largest eigengap; boundaries snapped to
     downbeats with at least 4 bars per section.
-and writes test/ref/<song>.structure.json (git-ignored). It is a reference for agreement checks, not ground truth:
+and writes test/ref/<song>.structure.json (git-ignored). Beat indices in chords, keyWindows and sections count
+librosa.util.sync's columns: column 0 spans the frames before the first beat, column j (j >= 1) spans beat j-1 to
+beat j (the last one to the end of the song). It is a reference for agreement checks, not ground truth:
 the user's ear judges keys and section labels.
 
 Run from the repo root: tools/.venv-ref/bin/python -I tools/structure-ref/reference.py [test]
@@ -147,6 +149,12 @@ def main() -> None:
             "song": song,
             "beatsFrom": "beatthis-small0",
             "beatsUsed": int(nb),
+            "beats": [round(float(t), 5) for t in beats],
+            "downbeatBeats": [int(i) for i in downbeat_idx],
+            # chromaBeats[i] = the 12-bin chroma (C..B, max-normalised per frame by librosa) of beat i, median over the
+            # frames from beat i to beat i+1 (librosa.util.sync with the beat frames; the first entry covers the frames
+            # before the first beat, so entry i+1 is beat i).
+            "chromaBeats": [[round(float(v), 4) for v in col] for col in chroma_b.T],
             "key": {"key": key, "r": round(r, 3)},
             "keyWindows": windows,
             "chords": chords(chroma_b, beats),
