@@ -124,7 +124,9 @@ test('column clicks add fainter clicks between the beats', async ({ page }) => {
   await page.getByTestId('columns-per-beat').selectOption('2');
   await page.getByTestId('column-click-toggle').check();
   await page.getByTestId('play-song').click();
-  await page.waitForTimeout(2000);
+  // CI's null sink starts the audio clock slowly: wait for it and the first sub-clicks instead of a fixed delay.
+  await expect.poll(async () => (await ana.playback(page)).contextState, { timeout: 10_000 }).toBe('running');
+  await expect.poll(async () => (await ana.playback(page)).subClicks, { timeout: 10_000 }).toBeGreaterThan(0);
   const a = await ana.playback(page);
   expect(a.subClicks).toBeGreaterThan(0);
   expect(a.subClicks).toBeGreaterThanOrEqual(a.clicksScheduled - 2);
