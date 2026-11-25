@@ -132,7 +132,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
       const tracker = result.settings.tracker;
       const effective = applyCorrections(result.grid, corrections, result.durationSec);
       const updated: Project = {
-        ...withTracker(p, tracker, { analysisKey: result.key, corrections }),
+        ...withTracker(p, tracker, { ...p.trackers[tracker], analysisKey: result.key, corrections }),
         tracker,
         tempoBpm: effective.beats.length > 1 ? gridTempo(effective.beats) : result.tempoBpm,
       };

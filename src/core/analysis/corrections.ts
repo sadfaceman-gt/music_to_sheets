@@ -117,6 +117,9 @@ function applyOne(grid: BeatGrid, c: Correction, durationSec: number): BeatGrid 
       }
       return { beats, downbeats, meter: spans };
     }
+    case 'range':
+      // CONTRACT (cycle 6): 6-ui implements the per-section level override; the stub leaves the grid as it is.
+      return grid;
     case 'setDownbeat': {
       const beat = Math.min(n - 1, Math.max(0, Math.round(c.beat)));
       const here = beatsPerBarAt(grid, beat);
