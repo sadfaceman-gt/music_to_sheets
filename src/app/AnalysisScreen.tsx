@@ -6,23 +6,33 @@ import { activeTracker, withTracker } from '../core/project/schema.ts';
 import type { Project } from '../core/project/schema.ts';
 import type { WaveformPeaks } from '../core/analysis/peaks.ts';
 import { BEAT_TRACKERS, DRIFT_WARN_PERCENT, settingsFor } from '../core/analysis/types.ts';
-import type { Analysis, BeatGrid, BeatTracker, Correction, StageProgress } from '../core/analysis/types.ts';
+import type { Analysis, BeatGrid, BeatTracker, Correction, SectionEdit, SectionSpan, StageProgress } from '../core/analysis/types.ts';
 import { analysisKey, gridTempo } from '../core/analysis/tempo.ts';
 import { applyCorrections, tapTempo } from '../core/analysis/corrections.ts';
+import { applySectionEdits, spansOnGrid, splitPoint } from '../core/analysis/sections.ts';
+import { allKeys, keyName } from '../core/analysis/music.ts';
+import type { TrackerState } from '../core/project/schema.ts';
 import { startAnalysis } from '../workers/analysisClient.ts';
 import type { AnalysisJob } from '../workers/analysisClient.ts';
 import { SongPlayer } from '../audio/songPlayer.ts';
 import { WaveformView } from '../analysis/WaveformView.tsx';
 import { clampView, ensureVisible, fitView, maxSecPerPx, zoomAbout } from '../analysis/viewport.ts';
 import type { View } from '../analysis/viewport.ts';
-import { addCorrection, emptyCorrections, redoCorrection, undoCorrection } from '../analysis/correctionState.ts';
-import type { CorrectionState } from '../analysis/correctionState.ts';
-import { barCount, formatBpm, formatMeter } from '../analysis/format.ts';
+import { addCorrection, addSectionEdit, editsSummary, emptyCorrections, pickKey, redoCorrection, undoCorrection } from '../analysis/correctionState.ts';
+import type { CorrectionState, KeyPick } from '../analysis/correctionState.ts';
+import { keyLine, keyValue, parseKeyValue } from '../analysis/structure.ts';
+import { ChordLane, SectionTimeline } from '../analysis/StructureView.tsx';
+import { SectionTools } from '../analysis/SectionTools.tsx';
+import { barCount, formatBpm, formatClock, formatMeter } from '../analysis/format.ts';
 import { readyToAutoApply, startsNewSequence, TAP_IDLE_SECONDS } from '../analysis/taps.ts';
 import { fallbackNotice, stageLabel, TRACKER_BUTTON_LABELS, trackerInfoText } from '../analysis/trackerInfo.ts';
 import { ProgressBar } from '../ui/ProgressBar.tsx';
 
 type RunState = 'idle' | 'running' | 'done' | 'cancelled' | 'error';
+
+/** The edits saved per tracker. */
+type Edits = Pick<TrackerState, 'corrections' | 'sectionEdits' | 'keyOverride'>;
+const NO_EDITS: Edits = { corrections: [], sectionEdits: [], keyOverride: null };
 
 interface Props {
   store: ProjectStore;
@@ -73,11 +83,20 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
 
   const durationSec = analysis?.durationSec ?? project?.source.durationSec ?? 0;
   const grid: BeatGrid | null = useMemo(() => (analysis ? applyCorrections(analysis.grid, cs.corrections, analysis.durationSec) : null), [analysis, cs.corrections]);
+  // Key, chord and section spans on the shown grid; the sections with the user's timeline edits on top.
+  const keys = useMemo(() => (analysis && grid ? spansOnGrid(analysis.keys, grid) : []), [analysis, grid]);
+  const chords = useMemo(() => (analysis && grid ? spansOnGrid(analysis.chords, grid) : []), [analysis, grid]);
+  const sections: SectionSpan[] = useMemo(
+    () => (analysis && grid ? applySectionEdits(spansOnGrid(analysis.sections, grid), cs.sectionEdits, grid, analysis.durationSec) : []),
+    [analysis, grid, cs.sectionEdits],
+  );
+  const [selected, setSelected] = useState<number | null>(null);
+  const sel = selected !== null && selected < sections.length ? selected : null;
 
   // Latest values for callbacks that outlive a render (player clock, key handlers, hooks, autosave).
-  const live = useRef({ project, analysis, grid, cs, view, width, playhead, runState, durationSec, pickBeat, fallbackReason });
+  const live = useRef({ project, analysis, grid, keys, chords, sections, cs, view, width, playhead, runState, durationSec, pickBeat, fallbackReason });
   useLayoutEffect(() => {
-    live.current = { project, analysis, grid, cs, view, width, playhead, runState, durationSec, pickBeat, fallbackReason };
+    live.current = { project, analysis, grid, keys, chords, sections, cs, view, width, playhead, runState, durationSec, pickBeat, fallbackReason };
   });
 
   const autosave = useRef<Autosave<Project> | null>(null);
@@ -112,7 +131,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
       if (!p || !a) return;
       const effective = applyCorrections(a.grid, next.corrections, a.durationSec);
       const updated: Project = {
-        ...withTracker(p, p.tracker, { ...activeTracker(p), corrections: next.corrections }),
+        ...withTracker(p, p.tracker, { ...activeTracker(p), corrections: next.corrections, sectionEdits: next.sectionEdits, keyOverride: next.keyOverride }),
         tempoBpm: effective.beats.length > 1 ? gridTempo(effective.beats) : a.tempoBpm,
       };
       setProject(updated);
@@ -123,16 +142,31 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
   );
 
   const addNew = useCallback((c: Correction) => applyCorrectionState(addCorrection(live.current.cs, c)), [applyCorrectionState]);
+  const addEdit = useCallback((e: SectionEdit) => applyCorrectionState(addSectionEdit(live.current.cs, e)), [applyCorrectionState]);
+  const setKey = useCallback(
+    (k: KeyPick | null) => {
+      if (keyValue(live.current.cs.keyOverride) !== keyValue(k)) applyCorrectionState(pickKey(live.current.cs, k));
+    },
+    [applyCorrectionState],
+  );
+  /** Moves boundary i (between sections i-1 and i) towards toSec; applySectionEdits snaps it to a downbeat. */
+  const moveBoundary = useCallback(
+    (i: number, toSec: number) => {
+      const s = live.current.sections[i];
+      if (s && i > 0) addEdit({ kind: 'move', from: s.start, to: toSec });
+    },
+    [addEdit],
+  );
   const undo = useCallback(() => applyCorrectionState(undoCorrection(live.current.cs)), [applyCorrectionState]);
   const redo = useCallback(() => applyCorrectionState(redoCorrection(live.current.cs)), [applyCorrectionState]);
 
-  /** Shows a finished analysis: restores its tracker's corrections, makes that tracker the project's and saves. */
+  /** Shows a finished analysis: restores its tracker's edits, makes that tracker the project's and saves. */
   const show = useCallback(
-    async (p: Project, result: Analysis, corrections: Correction[], reason: string | null) => {
+    async (p: Project, result: Analysis, edits: Edits, reason: string | null) => {
       const tracker = result.settings.tracker;
-      const effective = applyCorrections(result.grid, corrections, result.durationSec);
+      const effective = applyCorrections(result.grid, edits.corrections, result.durationSec);
       const updated: Project = {
-        ...withTracker(p, tracker, { analysisKey: result.key, corrections }),
+        ...withTracker(p, tracker, { ...p.trackers[tracker], analysisKey: result.key, corrections: edits.corrections, sectionEdits: edits.sectionEdits, keyOverride: edits.keyOverride }),
         tracker,
         tempoBpm: effective.beats.length > 1 ? gridTempo(effective.beats) : result.tempoBpm,
       };
@@ -140,7 +174,8 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
       live.current.project = updated;
       setProject(updated);
       setAnalysis(result);
-      setCs(emptyCorrections(corrections));
+      setCs(emptyCorrections(edits.corrections, edits.sectionEdits, edits.keyOverride));
+      setSelected(null);
       setFallbackReason(reason);
       setRunState('done');
       setProgress(null);
@@ -164,7 +199,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
           const state = p.trackers[tracker];
           const cached = await store.getAnalysis(state.analysisKey ?? analysisKey(p.source.sha256, settingsFor(tracker)));
           if (cached) {
-            await show(p, cached, state.corrections, null);
+            await show(p, cached, state, null);
             return true;
           }
         }
@@ -178,8 +213,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
         job.current = null;
         await store.putAnalysis(result);
         const made = result.settings.tracker;
-        const corrections = clear && made === tracker ? [] : p.trackers[made].corrections;
-        await show(p, result, corrections, reason);
+        await show(p, result, clear && made === tracker ? NO_EDITS : p.trackers[made], reason);
       } catch (e) {
         job.current = null;
         setProgress(null);
@@ -357,11 +391,23 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
       getBackend: () => live.current.analysis?.backend ?? null,
       getFallbackReason: () => live.current.fallbackReason,
       getElapsedMs: () => live.current.analysis?.elapsedMs ?? null,
+      getSongKey: () => {
+        const l = live.current;
+        const k = l.cs.keyOverride ?? l.analysis?.songKey ?? null;
+        return k ? { tonic: k.tonic, mode: k.mode, name: keyName(k) } : null;
+      },
+      getKeys: () => live.current.keys,
+      getChords: () => live.current.chords,
+      getSections: () => live.current.sections,
+      getLevelFixes: () => live.current.analysis?.levelFixes ?? [],
+      getSectionEdits: () => live.current.cs.sectionEdits,
+      getKeyOverride: () => live.current.cs.keyOverride,
+      moveBoundary: (i: number, toSec: number) => moveBoundary(i, toSec),
     };
     return () => {
       delete window.__mtsAnalysis;
     };
-  }, [projectId]);
+  }, [projectId, moveBoundary]);
 
   const seek = (t: number) => {
     setPlayhead(t);
@@ -459,6 +505,18 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
             <span>
               {grid.beats.length} beats, {barCount(grid)} bars
             </span>
+            <span data-testid="key-info">{keyLine(analysis.songKey, cs.keyOverride, keys)}</span>
+            <label className="flex items-center gap-1">
+              Pick key
+              <select data-testid="key-pick" className="rounded bg-slate-800 px-1 py-0.5" value={keyValue(cs.keyOverride)} onChange={(e) => setKey(parseKeyValue(e.target.value))}>
+                <option value="detected">Detected ({analysis.songKey ? keyName(analysis.songKey) : 'none'})</option>
+                {allKeys().map((k) => (
+                  <option key={keyValue(k)} value={keyValue(k)}>
+                    {keyName(k)}
+                  </option>
+                ))}
+              </select>
+            </label>
           </section>
           {analysis.driftPercent > DRIFT_WARN_PERCENT && (
             <p data-testid="drift-warning" role="alert" className="rounded border border-amber-700 bg-amber-950 p-2 text-sm text-amber-100">
@@ -466,6 +524,12 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
             </p>
           )}
 
+          <div data-testid="player-clock" className="flex flex-col items-end font-mono tabular-nums leading-tight" aria-label="Playback time">
+            <span data-testid="time-current">{formatClock(playhead)}</span>
+            <span data-testid="time-total" className="text-xs text-slate-500">
+              / {formatClock(durationSec)}
+            </span>
+          </div>
           <WaveformView
             peaks={peaks}
             grid={grid}
@@ -482,6 +546,27 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
               addNew({ kind: 'setDownbeat', beat });
             }}
           />
+          <ChordLane chords={chords} view={view} width={width} />
+          <SectionTimeline
+            sections={sections}
+            view={view}
+            width={width}
+            durationSec={durationSec}
+            selected={sel}
+            onSelect={(i) => setSelected((cur) => (cur === i ? null : i))}
+            onMoveBoundary={moveBoundary}
+          />
+          {sel !== null && sections[sel] && (
+            <SectionTools
+              section={sections[sel]}
+              isLast={sel === sections.length - 1}
+              splitAt={splitPoint(sections, sel, playhead, grid)}
+              onSplit={(at) => addEdit({ kind: 'split', at })}
+              onMerge={() => addEdit({ kind: 'merge', at: sections[sel]!.end })}
+              onRename={(label) => addEdit({ kind: 'rename', at: (sections[sel]!.start + sections[sel]!.end) / 2, label })}
+              onLevel={(op) => addNew({ kind: 'range', start: sections[sel]!.start, end: sections[sel]!.end, op })}
+            />
+          )}
 
           <section className="flex flex-wrap items-center gap-2">
             <button type="button" data-testid="play-song" className={button} disabled={playing} onClick={() => void play()}>
@@ -601,7 +686,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
               >
                 Set downbeat
               </button>
-              <button type="button" data-testid="undo-correction" className={button} disabled={cs.corrections.length === 0} onClick={undo}>
+              <button type="button" data-testid="undo-correction" className={button} disabled={cs.done.length === 0} onClick={undo}>
                 Undo
               </button>
               <button type="button" data-testid="redo-correction" className={button} disabled={cs.redo.length === 0} onClick={redo}>
@@ -615,7 +700,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
           <section>
             {confirmRerun ? (
               <div data-testid="confirm-rerun" className="flex items-center gap-2 rounded border border-amber-700 bg-amber-950 p-2 text-sm">
-                <span>{cs.corrections.length > 0 ? `Re-running discards your ${cs.corrections.length} correction${cs.corrections.length === 1 ? '' : 's'}.` : 'Run the analysis again?'}</span>
+                <span>{editsSummary(cs) ? `Re-running discards your ${editsSummary(cs)}.` : 'Run the analysis again?'}</span>
                 <button type="button" data-testid="confirm-rerun-yes" className="rounded bg-amber-700 px-3 py-1 hover:bg-amber-600" onClick={rerun}>
                   Re-run
                 </button>
@@ -628,7 +713,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
                 type="button"
                 data-testid="rerun-analysis"
                 className={button}
-                onClick={() => (cs.corrections.length > 0 ? setConfirmRerun(true) : rerun())}
+                onClick={() => (editsSummary(cs) ? setConfirmRerun(true) : rerun())}
               >
                 Re-run analysis
               </button>

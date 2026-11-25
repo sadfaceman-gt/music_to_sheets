@@ -6,10 +6,14 @@
  */
 import { z } from 'zod';
 import { ANALYSIS_VERSION, DEFAULT_TRACKER } from '../analysis/types.ts';
-import type { BeatTracker } from '../analysis/types.ts';
+import { SECTION_LABELS } from '../analysis/types.ts';
+import type { BeatTracker, SectionLabel } from '../analysis/types.ts';
 
-/** 2 (M2b): analysis key and corrections per tracker (`trackers`), and the tracker shown (`tracker`). */
-export const PROJECT_SCHEMA_VERSION = 2;
+/**
+ * 2 (M2b): analysis key and corrections per tracker (`trackers`), and the tracker shown (`tracker`).
+ * 3 (M2c): each tracker state gains `keyOverride` (pick key) and `sectionEdits` (the section timeline edits).
+ */
+export const PROJECT_SCHEMA_VERSION = 3;
 
 /** Longest song the app imports (Design 5.1, a memory guard). */
 export const MAX_SONG_SECONDS = 15 * 60;
@@ -46,6 +50,11 @@ export const analysisSettingsSchema = z.object({
   tightness: z.number().nonnegative(),
 });
 
+const pitchClassSchema = z.number().int().min(0).max(11) as unknown as z.ZodType<import('../analysis/types.ts').PitchClass>;
+const musicalKeySchema = z.object({ tonic: pitchClassSchema, mode: z.enum(['major', 'minor']), confidence: z.number() });
+const spanShape = z.object({ start: z.number(), end: z.number(), startBeat: z.number().int().nonnegative(), endBeat: z.number().int().nonnegative() });
+export const sectionLabelSchema = z.enum(SECTION_LABELS as unknown as [SectionLabel, ...SectionLabel[]]);
+
 export const analysisSchema = z.object({
   version: z.literal(ANALYSIS_VERSION),
   key: z.string(),
@@ -55,9 +64,11 @@ export const analysisSchema = z.object({
   tempoBpm: z.number().nonnegative(),
   tempoCurve: z.array(z.object({ time: z.number(), bpm: z.number() })),
   driftPercent: z.number().nonnegative(),
-  keys: z.array(z.object({ startBeat: z.number(), key: z.string(), confidence: z.number() })),
-  chords: z.array(z.object({ startBeat: z.number(), endBeat: z.number(), root: z.string(), quality: z.string(), confidence: z.number() })),
-  sections: z.array(z.object({ startBeat: z.number(), endBeat: z.number(), label: z.string(), confidence: z.number() })),
+  songKey: musicalKeySchema.nullable(),
+  keys: z.array(spanShape.extend(musicalKeySchema.shape)),
+  chords: z.array(spanShape.extend({ root: pitchClassSchema.nullable(), quality: z.enum(['maj', 'min', 'none']), confidence: z.number() })),
+  sections: z.array(spanShape.extend({ label: sectionLabelSchema, confidence: z.number(), cluster: z.number().int() })),
+  levelFixes: z.array(spanShape.extend({ factor: z.union([z.literal(2), z.literal(0.5)]) })),
   elapsedMs: z.number().nonnegative(),
   backend: z.enum(['webgpu', 'wasm']).nullable(),
 });
@@ -68,6 +79,14 @@ export const correctionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('half') }),
   z.object({ kind: z.literal('nudge'), ms: z.number() }),
   z.object({ kind: z.literal('setDownbeat'), beat: z.number().int().nonnegative() }),
+  z.object({ kind: z.literal('range'), start: z.number(), end: z.number(), op: z.enum(['double', 'half', 'shift']) }),
+]);
+
+export const sectionEditSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('move'), from: z.number(), to: z.number() }),
+  z.object({ kind: z.literal('split'), at: z.number() }),
+  z.object({ kind: z.literal('merge'), at: z.number() }),
+  z.object({ kind: z.literal('rename'), at: z.number(), label: sectionLabelSchema }),
 ]);
 
 export const sourceSchema = z.object({
@@ -88,6 +107,10 @@ export const trackerStateSchema = z.object({
   analysisKey: z.string().nullable(),
   /** The user's corrections, applied in order on top of this tracker's grid. */
   corrections: z.array(correctionSchema),
+  /** Pick-key correction: replaces the detected song key (null = use the detected one). */
+  keyOverride: z.object({ tonic: pitchClassSchema, mode: z.enum(['major', 'minor']) }).nullable(),
+  /** Section timeline edits, applied in order on top of this tracker's detected sections. */
+  sectionEdits: z.array(sectionEditSchema),
 });
 
 export const projectSchema = z.object({
@@ -118,7 +141,12 @@ export type TrackerState = z.infer<typeof trackerStateSchema>;
 
 /** Empty per-tracker state for a new project. */
 export function emptyTrackers(): Project['trackers'] {
-  return { 'beatthis-small0': { analysisKey: null, corrections: [] }, dsp: { analysisKey: null, corrections: [] } };
+  return { 'beatthis-small0': emptyTrackerState(), dsp: emptyTrackerState() };
+}
+
+/** A tracker that hasn't run, with no corrections or edits. */
+export function emptyTrackerState(): TrackerState {
+  return { analysisKey: null, corrections: [], keyOverride: null, sectionEdits: [] };
 }
 
 /** The shown tracker's state. */
@@ -143,17 +171,34 @@ export function migrateProjectV1(raw: Record<string, unknown>): Record<string, u
   const kept = Array.isArray(corrections) ? corrections : [];
   return {
     ...rest,
-    schemaVersion: PROJECT_SCHEMA_VERSION,
+    schemaVersion: 2,
     tracker: kept.length > 0 ? 'dsp' : DEFAULT_TRACKER,
     trackers: { 'beatthis-small0': { analysisKey: null, corrections: [] }, dsp: { analysisKey: null, corrections: kept } },
   };
 }
 
+/**
+ * v2 -> v3: each tracker state gains keyOverride null and no section edits. Its analysisKey becomes null because
+ * ANALYSIS_VERSION 3 changed the keys (the analysis re-runs; beat corrections still fit, except where the level
+ * evening changed a stretch of the grid).
+ */
+export function migrateProjectV2(raw: Record<string, unknown>): Record<string, unknown> {
+  const trackers = (raw.trackers ?? {}) as Record<string, Record<string, unknown> | undefined>;
+  const up = (t: Record<string, unknown> | undefined): Record<string, unknown> => ({
+    corrections: Array.isArray(t?.corrections) ? t.corrections : [],
+    analysisKey: null,
+    keyOverride: null,
+    sectionEdits: [],
+  });
+  return { ...raw, schemaVersion: PROJECT_SCHEMA_VERSION, trackers: { 'beatthis-small0': up(trackers['beatthis-small0']), dsp: up(trackers.dsp) } };
+}
+
 /** Validates a stored record, migrating older schema versions first. Throws a ZodError when invalid. */
 export function parseProject(raw: unknown): Project {
-  const r = raw as Record<string, unknown> | null;
-  if (r && typeof r === 'object' && r.schemaVersion === 1) return projectSchema.parse(migrateProjectV1(r));
-  return projectSchema.parse(raw);
+  let r = raw as Record<string, unknown> | null;
+  if (r && typeof r === 'object' && r.schemaVersion === 1) r = migrateProjectV1(r);
+  if (r && typeof r === 'object' && r.schemaVersion === 2) r = migrateProjectV2(r);
+  return projectSchema.parse(r);
 }
 
 /** File extension (lower case) if the importer accepts it, else null. */

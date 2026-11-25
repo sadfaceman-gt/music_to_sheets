@@ -51,6 +51,96 @@ function nearestIndex(beats: number[], time: number): number {
   return best;
 }
 
+/** A beat this close before a range's start or end counts as on it (range bounds are often a beat's own time). */
+const RANGE_EPS = 1e-3; // facts-ok: seconds
+
+/**
+ * The per-section level override (T37): x2, /2 or an off-beat shift on the beats in [start, end) only. Beats outside
+ * stay bit for bit; their downbeats keep their place (indices after the range move by the change in beat count).
+ * Inside, bars are rebuilt from the stretch's first downbeat with the beats per bar in force there; the meter gains a
+ * span for the range and the span in force after it restarts at the first downbeat after the range.
+ */
+function applyRange(grid: BeatGrid, c: Extract<Correction, { kind: 'range' }>, durationSec: number): BeatGrid {
+  const n = grid.beats.length;
+  const inside = (t: number) => t >= c.start - RANGE_EPS && t < c.end - RANGE_EPS;
+  let a = 0;
+  while (a < n && !inside(grid.beats[a]!)) a++;
+  let b = a;
+  while (b < n && inside(grid.beats[b]!)) b++;
+  if (b - a < 1) return grid;
+  // Interval after beat i (the one before it at the song's last beat).
+  const gap = (i: number) => (i + 1 < n ? grid.beats[i + 1]! - grid.beats[i]! : i > 0 ? grid.beats[i]! - grid.beats[i - 1]! : 0);
+  const d0 = grid.downbeats.find((d) => d >= a && d < b);
+  const anchorOld = d0 ?? a;
+  /** New beats of the stretch and the new index (relative to a) of the old anchor beat. */
+  let mid: number[];
+  let anchorRel: number;
+  switch (c.op) {
+    case 'double': {
+      mid = [];
+      anchorRel = 0;
+      for (let i = a; i < b; i++) {
+        if (i === anchorOld) anchorRel = mid.length;
+        mid.push(grid.beats[i]!);
+        // Midpoints only inside the range (after its last beat only when the next beat is close to the end).
+        const m = i + 1 < n ? (grid.beats[i]! + grid.beats[i + 1]!) / 2 : null;
+        if (m !== null && inside(m)) mid.push(m);
+      }
+      break;
+    }
+    case 'half': {
+      if (b - a < 2) return grid;
+      const parity = anchorOld % 2;
+      mid = [];
+      for (let i = a; i < b; i++) if (i % 2 === parity) mid.push(grid.beats[i]!);
+      // The anchor has the kept parity; count the kept beats before it.
+      const firstKept = a % 2 === parity ? a : a + 1;
+      anchorRel = (anchorOld - firstKept) / 2;
+      break;
+    }
+    case 'shift': {
+      if (n < 2) return grid;
+      mid = [];
+      for (let i = a; i < b; i++) mid.push(grid.beats[i]! + gap(i) / 2);
+      anchorRel = anchorOld - a;
+      break;
+    }
+  }
+  const before = grid.beats.slice(0, a);
+  const after = grid.beats.slice(b);
+  const raw = [...before, ...mid, ...after];
+  const beats = clean(raw, durationSec);
+  if (beats.length !== raw.length || mid.length === 0) return grid; // a collapsed or out-of-song beat: leave the grid as it was
+  const delta = mid.length - (b - a);
+  const downbeats: number[] = grid.downbeats.filter((d) => d < a);
+  const meter: MeterSpan[] = grid.meter.filter((s) => s.startBeat < a).map((s) => ({ ...s, signature: { ...s.signature } }));
+  if (d0 !== undefined) {
+    const bpb = beatsPerBarAt(grid, d0);
+    const sigHere = [...grid.meter].reverse().find((s) => s.startBeat <= d0)?.signature ?? DEFAULT_SIGNATURE;
+    const first = a + (((anchorRel % bpb) + bpb) % bpb);
+    for (let i = first; i < a + mid.length; i += bpb) downbeats.push(i);
+    meter.push({ startBeat: first, signature: { ...sigHere }, beatsPerBar: bpb });
+  }
+  const afterDowns = grid.downbeats.filter((d) => d >= b).map((d) => d + delta);
+  downbeats.push(...afterDowns);
+  const firstAfter = afterDowns[0];
+  if (firstAfter !== undefined) {
+    const inForce = [...grid.meter].reverse().find((s) => s.startBeat < b);
+    if (inForce) meter.push({ ...inForce, signature: { ...inForce.signature }, startBeat: firstAfter });
+    for (const s of grid.meter) if (s.startBeat >= b) meter.push({ ...s, signature: { ...s.signature }, startBeat: s.startBeat + delta });
+  }
+  // Drop spans that start where a later one starts, and merge neighbours with the same meter.
+  const spans: MeterSpan[] = [];
+  for (const s of meter.sort((x, y) => x.startBeat - y.startBeat)) {
+    const last = spans[spans.length - 1];
+    if (last && last.startBeat === s.startBeat) spans.pop();
+    const prev = spans[spans.length - 1];
+    if (prev && prev.beatsPerBar === s.beatsPerBar && prev.signature.num === s.signature.num && prev.signature.den === s.signature.den) continue;
+    spans.push(s);
+  }
+  return { beats, downbeats, meter: spans };
+}
+
 function applyOne(grid: BeatGrid, c: Correction, durationSec: number): BeatGrid {
   const n = grid.beats.length;
   if (n < 2) return grid;
@@ -117,6 +207,8 @@ function applyOne(grid: BeatGrid, c: Correction, durationSec: number): BeatGrid 
       }
       return { beats, downbeats, meter: spans };
     }
+    case 'range':
+      return applyRange(grid, c, durationSec);
     case 'setDownbeat': {
       const beat = Math.min(n - 1, Math.max(0, Math.round(c.beat)));
       const here = beatsPerBarAt(grid, beat);

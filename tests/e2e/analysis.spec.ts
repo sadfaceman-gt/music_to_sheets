@@ -162,3 +162,26 @@ test('cancelling the analysis leaves a Run analysis button', async ({ page }) =>
   await page.getByTestId('cancel-analysis').click({ timeout: 60_000 });
   await expect(page.getByTestId('run-analysis')).toBeVisible();
 });
+
+test('T38: the player clock shows the time and the length (hh:mm:ss.ttt, monospace, top right above the waveform)', async ({ page }) => {
+  await openSong(page, song44());
+  const current = page.getByTestId('time-current');
+  const total = page.getByTestId('time-total');
+  await expect(current).toHaveText('00:00:00.000');
+  await expect(total).toHaveText(/^\/ 00:00:\d\d\.\d{3}$/);
+  const font = await current.evaluate((el) => getComputedStyle(el).fontFamily);
+  expect(font.toLowerCase()).toMatch(/mono/);
+  const size = async (sel: typeof current) => parseFloat(await sel.evaluate((el) => getComputedStyle(el).fontSize));
+  expect(await size(total)).toBeLessThan(await size(current));
+  // Above the waveform and at its right edge.
+  const wave = (await page.getByTestId('waveform-canvas').boundingBox())!;
+  const clock = (await page.getByTestId('player-clock').boundingBox())!;
+  expect(clock.y + clock.height).toBeLessThanOrEqual(wave.y + 1);
+  const cur = (await current.boundingBox())!;
+  expect(Math.abs(cur.x + cur.width - (wave.x + wave.width))).toBeLessThan(4);
+  // It runs while the song plays.
+  await page.getByTestId('play-song').click();
+  await expect.poll(async () => (await ana.playback(page)).contextState, { timeout: 10_000 }).toBe('running');
+  await expect.poll(async () => await current.textContent(), { timeout: 10_000 }).not.toBe('00:00:00.000');
+  await page.getByTestId('stop-song').click();
+});

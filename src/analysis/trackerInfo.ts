@@ -26,6 +26,11 @@ const STAGE_WORDS: Record<StageProgress['stage'], string> = {
   tempo: 'finding the tempo',
   beats: 'placing beats',
   downbeats: 'finding bars',
+  level: 'evening out the tempo level',
+  chroma: 'reading the harmony',
+  key: 'finding the key',
+  chords: 'finding chords',
+  sections: 'finding sections',
   done: 'finishing',
 };
 

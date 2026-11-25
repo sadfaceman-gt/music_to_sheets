@@ -5,7 +5,7 @@ import type { DecodedSong } from '../../src/audio/decode.ts';
 import { analysisKey } from '../../src/core/analysis/tempo.ts';
 import { ANALYSIS_VERSION, DEFAULT_ANALYSIS_SETTINGS, settingsFor } from '../../src/core/analysis/types.ts';
 import type { Analysis } from '../../src/core/analysis/types.ts';
-import { SOURCES_FOLDER, sourceFileNames } from '../../src/core/project/schema.ts';
+import { PROJECT_SCHEMA_VERSION, SOURCES_FOLDER, sourceFileNames } from '../../src/core/project/schema.ts';
 import { MtsDb } from '../../src/storage/db.ts';
 import { createProjectStore } from '../../src/storage/projects.ts';
 import type { StoreDeps } from '../../src/storage/projects.ts';
@@ -80,6 +80,8 @@ function analysisFor(sha: string): Analysis {
     keys: [],
     chords: [],
     sections: [],
+    songKey: null,
+    levelFixes: [],
     elapsedMs: 5,
     backend: null,
   };
@@ -208,7 +210,7 @@ describe('save, open, list', () => {
     const opened = await store.open(a.id);
     expect(opened!.meta.lastOpenedAt).toBeGreaterThan(b.meta.lastOpenedAt);
     expect((await store.list()).map((p) => p.id)).toEqual([a.id, b.id]);
-    await store.save({ ...a, trackers: { ...a.trackers, 'beatthis-small0': { analysisKey: null, corrections: [{ kind: 'double' }] } }, tempoBpm: 100 });
+    await store.save({ ...a, trackers: { ...a.trackers, 'beatthis-small0': { analysisKey: null, corrections: [{ kind: 'double' }], keyOverride: null, sectionEdits: [] } }, tempoBpm: 100 });
     const saved = (await store.get(a.id))!;
     expect(saved.trackers['beatthis-small0'].corrections).toEqual([{ kind: 'double' }]);
     expect(saved.meta.updatedAt).toBeGreaterThan(a.meta.updatedAt);
@@ -238,7 +240,7 @@ describe('delete', () => {
     const { store, o, db } = setup();
     const p = (await store.importFile(song('a.mp3', 'a'))).project;
     await store.putAnalysis(analysisFor(p.source.sha256));
-    await store.save({ ...p, trackers: { ...p.trackers, 'beatthis-small0': { analysisKey: analysisFor(p.source.sha256).key, corrections: [] } } });
+    await store.save({ ...p, trackers: { ...p.trackers, 'beatthis-small0': { analysisKey: analysisFor(p.source.sha256).key, corrections: [], keyOverride: null, sectionEdits: [] } } });
     await store.delete(p.id);
     expect(await store.list()).toEqual([]);
     expect(o.files.size).toBe(0);
@@ -263,9 +265,9 @@ describe('delete', () => {
     const a = (await store.importFile(song('a.mp3', 'a'))).project;
     const analysis = analysisFor(a.source.sha256);
     await store.putAnalysis(analysis);
-    await store.save({ ...a, trackers: { ...a.trackers, 'beatthis-small0': { analysisKey: analysis.key, corrections: [] } } });
+    await store.save({ ...a, trackers: { ...a.trackers, 'beatthis-small0': { analysisKey: analysis.key, corrections: [], keyOverride: null, sectionEdits: [] } } });
     const b = (await store.importFile(song('a.mp3', 'a'), undefined, 'new')).project;
-    await store.save({ ...b, trackers: { ...b.trackers, 'beatthis-small0': { analysisKey: analysis.key, corrections: [] } } });
+    await store.save({ ...b, trackers: { ...b.trackers, 'beatthis-small0': { analysisKey: analysis.key, corrections: [], keyOverride: null, sectionEdits: [] } } });
     await store.delete(a.id);
     expect(await store.getAnalysis(analysis.key)).toEqual(analysis);
     await store.delete(b.id);
@@ -279,11 +281,11 @@ describe('delete', () => {
     const dsp = { ...bt, settings: settingsFor('dsp'), key: analysisKey(a.source.sha256, settingsFor('dsp')), backend: null };
     await store.putAnalysis(bt);
     await store.putAnalysis(dsp);
-    const both = { ...a.trackers, 'beatthis-small0': { analysisKey: bt.key, corrections: [] }, dsp: { analysisKey: dsp.key, corrections: [] } };
+    const both = { ...a.trackers, 'beatthis-small0': { analysisKey: bt.key, corrections: [], keyOverride: null, sectionEdits: [] }, dsp: { analysisKey: dsp.key, corrections: [], keyOverride: null, sectionEdits: [] } };
     await store.save({ ...a, trackers: both });
     const b = (await store.importFile(song('a.mp3', 'a'), undefined, 'new')).project;
     // b only ran the DSP tracker; a's Beat This! analysis is no longer used by anyone but a.
-    await store.save({ ...b, tracker: 'dsp', trackers: { ...b.trackers, dsp: { analysisKey: dsp.key, corrections: [] } } });
+    await store.save({ ...b, tracker: 'dsp', trackers: { ...b.trackers, dsp: { analysisKey: dsp.key, corrections: [], keyOverride: null, sectionEdits: [] } } });
     await store.delete(a.id);
     expect(await db.artifacts.get(bt.key)).toBeUndefined();
     expect(await db.artifacts.get(dsp.key)).toBeDefined();
@@ -298,7 +300,7 @@ describe('delete', () => {
     const dsp = { ...bt, settings: settingsFor('dsp'), key: analysisKey(a.source.sha256, settingsFor('dsp')), backend: null };
     await store.putAnalysis(bt);
     await store.putAnalysis(dsp);
-    const both = { ...a.trackers, 'beatthis-small0': { analysisKey: bt.key, corrections: [] }, dsp: { analysisKey: dsp.key, corrections: [] } };
+    const both = { ...a.trackers, 'beatthis-small0': { analysisKey: bt.key, corrections: [], keyOverride: null, sectionEdits: [] }, dsp: { analysisKey: dsp.key, corrections: [], keyOverride: null, sectionEdits: [] } };
     await store.save({ ...a, trackers: both });
     const b = (await store.importFile(song('a.mp3', 'a'), undefined, 'new')).project;
     await store.save({ ...b, trackers: both });
@@ -327,14 +329,14 @@ describe('schema v1 rows (cycle 4 projects)', () => {
     await asV1(db, a.id, corrections);
 
     const opened = (await store.open(a.id))!;
-    expect(opened.schemaVersion).toBe(2);
+    expect(opened.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
     expect(opened.tracker).toBe('dsp');
     expect(opened.trackers.dsp.corrections).toEqual(corrections);
 
     await asV1(db, a.id, corrections);
     await store.save(opened);
     const raw = (await db.projects.get(a.id))!;
-    expect(raw.schemaVersion).toBe(2);
+    expect(raw.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
     expect(raw).not.toHaveProperty('corrections');
     expect((raw.trackers as { dsp: { corrections: unknown[] } }).dsp.corrections).toEqual(corrections);
   });
@@ -344,9 +346,61 @@ describe('schema v1 rows (cycle 4 projects)', () => {
     const a = (await store.importFile(song('a.mp3', 'a'))).project;
     const b = (await store.importFile(song('b.mp3', 'b'))).project;
     await asV1(db, a.id, []);
-    expect((await store.list()).map((p) => p.schemaVersion)).toEqual([2, 2]);
+    expect((await store.list()).map((p) => p.schemaVersion)).toEqual([PROJECT_SCHEMA_VERSION, PROJECT_SCHEMA_VERSION]);
     await store.delete(a.id);
     expect((await store.list()).map((p) => p.id)).toEqual([b.id]);
+  });
+});
+
+describe('schema v2 rows (cycle 5 projects)', () => {
+  beforeEach(() => vi.spyOn(console, 'warn').mockImplementation(() => undefined));
+
+  /** Rewrites a stored project as a cycle 5 (schema v2) record: trackers without keyOverride or sectionEdits. */
+  async function asV2(db: MtsDb, id: string, tracker: 'beatthis-small0' | 'dsp', corrections: unknown[]): Promise<void> {
+    const row = (await db.projects.get(id))!;
+    const v2 = (c: unknown[]) => ({ analysisKey: 'v2-key', corrections: c });
+    await db.projects.put({ ...row, schemaVersion: 2, tracker, trackers: { 'beatthis-small0': v2(tracker === 'dsp' ? [] : corrections), dsp: v2(tracker === 'dsp' ? corrections : []) } });
+  }
+
+  it('opens a v2 row as v3 with its corrections and tracker, and rewrites it as v3 on save', async () => {
+    const { store, db } = setup();
+    const a = (await store.importFile(song('a.mp3', 'a'))).project;
+    const corrections = [{ kind: 'double' }, { kind: 'nudge', ms: 10 }];
+    await asV2(db, a.id, 'beatthis-small0', corrections);
+
+    const opened = (await store.open(a.id))!;
+    expect(opened.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(opened.tracker).toBe('beatthis-small0');
+    expect(opened.trackers['beatthis-small0']).toEqual({ analysisKey: null, corrections, keyOverride: null, sectionEdits: [] });
+    expect(opened.trackers.dsp.corrections).toEqual([]);
+
+    await store.save(opened);
+    const raw = (await db.projects.get(a.id))! as Record<string, unknown>;
+    expect(raw.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect((raw.trackers as Record<string, Record<string, unknown>>)['beatthis-small0']).toEqual({ analysisKey: null, corrections, keyOverride: null, sectionEdits: [] });
+  });
+
+  it('keeps the DSP tracker and its corrections', async () => {
+    const { store, db } = setup();
+    const a = (await store.importFile(song('a.mp3', 'a'))).project;
+    await asV2(db, a.id, 'dsp', [{ kind: 'setDownbeat', beat: 3 }]);
+    const opened = (await store.open(a.id))!;
+    expect(opened.tracker).toBe('dsp');
+    expect(opened.trackers.dsp.corrections).toEqual([{ kind: 'setDownbeat', beat: 3 }]);
+    expect((await store.list()).map((p) => p.schemaVersion)).toEqual([PROJECT_SCHEMA_VERSION]);
+  });
+
+  it('round-trips v3 edits: section edits, key pick and range corrections', async () => {
+    const { store } = setup();
+    const a = (await store.importFile(song('a.mp3', 'a'))).project;
+    const state = {
+      analysisKey: null,
+      corrections: [{ kind: 'range' as const, start: 8, end: 16, op: 'double' as const }],
+      keyOverride: { tonic: 7 as const, mode: 'major' as const },
+      sectionEdits: [{ kind: 'move' as const, from: 16, to: 20 }, { kind: 'rename' as const, at: 3, label: 'intro' as const }],
+    };
+    await store.save({ ...a, trackers: { ...a.trackers, dsp: state } });
+    expect((await store.open(a.id))!.trackers.dsp).toEqual(state);
   });
 });
 

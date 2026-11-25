@@ -30,18 +30,28 @@ describe('parseProject migration', () => {
     expect(p.tracker).toBe('dsp');
     expect(p.trackers.dsp.corrections).toEqual(corrections);
     expect(p.trackers.dsp.analysisKey).toBeNull();
-    expect(p.trackers['beatthis-small0']).toEqual({ analysisKey: null, corrections: [] });
+    expect(p.trackers['beatthis-small0']).toEqual({ analysisKey: null, corrections: [], keyOverride: null, sectionEdits: [] });
     expect(p.tempoBpm).toBe(120);
     expect(p).not.toHaveProperty('corrections');
     expect(p).not.toHaveProperty('analysisKey');
   });
 
-  it('leaves a v2 record unchanged', () => {
-    const v2 = parseProject(v1Record());
-    const again = parseProject({ ...v2, tracker: 'dsp', trackers: { ...emptyTrackers(), dsp: { analysisKey: 'k', corrections } } });
+  it('leaves a current record unchanged', () => {
+    const cur = parseProject(v1Record());
+    const state = { analysisKey: 'k', corrections, keyOverride: { tonic: 11 as const, mode: 'minor' as const }, sectionEdits: [{ kind: 'split' as const, at: 12 }] };
+    const again = parseProject({ ...cur, tracker: 'dsp', trackers: { ...emptyTrackers(), dsp: state } });
     expect(again.tracker).toBe('dsp');
-    expect(again.trackers.dsp).toEqual({ analysisKey: 'k', corrections });
+    expect(again.trackers.dsp).toEqual(state);
     expect(parseProject(again)).toEqual(again);
+  });
+
+  it('migrates a v2 record to v3: corrections kept, analysis keys dropped, no key override or section edits', () => {
+    const v2 = { ...parseProject(v1Record()), schemaVersion: 2, tracker: 'dsp', trackers: { 'beatthis-small0': { analysisKey: 'a', corrections: [] }, dsp: { analysisKey: 'b', corrections } } };
+    const p = parseProject(v2);
+    expect(p.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(p.tracker).toBe('dsp');
+    expect(p.trackers.dsp).toEqual({ analysisKey: null, corrections, keyOverride: null, sectionEdits: [] });
+    expect(p.trackers['beatthis-small0']).toEqual({ analysisKey: null, corrections: [], keyOverride: null, sectionEdits: [] });
   });
 
   it('throws for garbage', () => {
