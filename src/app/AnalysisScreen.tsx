@@ -23,7 +23,7 @@ import type { CorrectionState, KeyPick } from '../analysis/correctionState.ts';
 import { keyLine, keyValue, parseKeyValue } from '../analysis/structure.ts';
 import { ChordLane, SectionTimeline } from '../analysis/StructureView.tsx';
 import { SectionTools } from '../analysis/SectionTools.tsx';
-import { barCount, formatBpm, formatMeter } from '../analysis/format.ts';
+import { barCount, formatBpm, formatClock, formatMeter } from '../analysis/format.ts';
 import { readyToAutoApply, startsNewSequence, TAP_IDLE_SECONDS } from '../analysis/taps.ts';
 import { fallbackNotice, stageLabel, TRACKER_BUTTON_LABELS, trackerInfoText } from '../analysis/trackerInfo.ts';
 import { ProgressBar } from '../ui/ProgressBar.tsx';
@@ -524,6 +524,12 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
             </p>
           )}
 
+          <div data-testid="player-clock" className="flex flex-col items-end font-mono tabular-nums leading-tight" aria-label="Playback time">
+            <span data-testid="time-current">{formatClock(playhead)}</span>
+            <span data-testid="time-total" className="text-xs text-slate-500">
+              / {formatClock(durationSec)}
+            </span>
+          </div>
           <WaveformView
             peaks={peaks}
             grid={grid}

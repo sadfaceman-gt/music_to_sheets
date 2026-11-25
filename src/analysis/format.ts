@@ -5,6 +5,16 @@ export function formatDuration(sec: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; // facts-ok: seconds per minute
 }
 
+/** A song time as hh:mm:ss.ttt (T38), milliseconds truncated so the clock never runs ahead; negative times show as 0. */
+export function formatClock(sec: number): string {
+  const ms = Math.max(0, Math.floor(sec * 1000 + 1e-6)); // facts-ok: ms per second
+  const pad = (n: number, w = 2): string => String(n).padStart(w, '0');
+  const h = Math.floor(ms / 3600000); // facts-ok: ms per hour
+  const m = Math.floor(ms / 60000) % 60; // facts-ok: ms per minute, minutes per hour
+  const s = Math.floor(ms / 1000) % 60; // facts-ok: ms per second, seconds per minute
+  return `${pad(h)}:${pad(m)}:${pad(s)}.${pad(ms % 1000, 3)}`; // facts-ok: ms per second
+}
+
 export function formatBpm(bpm: number | null): string {
   return bpm === null ? 'not analysed' : `${bpm.toFixed(1)} BPM`;
 }
