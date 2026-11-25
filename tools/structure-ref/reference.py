@@ -2,10 +2,12 @@
 
 For every song with test/ref/<song>.f32 (22.05 kHz mono, written by tools/beat-ref/reference.py) and
 test/ref/<song>.beatthis-small0.json (beats, written by tools/beat-this/reference.py), this computes, with librosa:
-  - beat-synchronous CQT chroma (median per beat)
-  - key: Krumhansl-Schmuckler correlation, global and in sliding 16-bar windows (step 4 bars)
-  - chords: 24 major/minor templates (centred correlation) + no-chord (constant 0.3), Viterbi smoothing
-    (self-transition 0.9)
+  - harmony features (changed in the cycle 6 review, T39): the CQT's harmonic part (soft median-filter HPSS on the CQT
+    magnitudes, 17 frames by 17 bins), log(1 + 100 x) compressed, folded to chroma in a treble band (C3-C7; for the
+    key C3-C8 with each frame max-normalised) and a bass band (E1-E3), median per beat
+  - key: Krumhansl-Schmuckler correlation on the key chroma, global and in sliding 16-bar windows (step 4 bars)
+  - chords: 24 major/minor templates (centred correlation with the treble chroma, mixed 2:1 with the centred bass
+    chroma at the chord's root) + no-chord (constant 0.15), Viterbi smoothing (self-transition 0.9)
   - sections: Laplacian structural segmentation (McFee and Ellis 2014, as in librosa's gallery example):
     chroma recurrence (kNN, 4-beat time-delay embedding) + MFCC path continuity, normalised Laplacian,
     k-means on the first k eigenvectors for k = 3..8; the chosen k is the largest eigengap; boundaries snapped to
@@ -46,7 +48,38 @@ def ks_key(chroma_sum: np.ndarray) -> tuple[str, float]:
     return best, best_r
 
 
-def chords(chroma_b: np.ndarray, beats: np.ndarray) -> list[dict]:
+HARMONIC_WIDTH = 17
+LOG_GAIN = 100
+TREBLE, BASS, KEY_BAND = (48, 96), (28, 52), (48, 108)
+NO_CHORD = 0.15
+BASS_WEIGHT = 0.5
+
+
+def harmonic_cqt(C: np.ndarray) -> np.ndarray:
+    H = scipy.ndimage.median_filter(C, size=(1, HARMONIC_WIDTH))
+    P = scipy.ndimage.median_filter(C, size=(HARMONIC_WIDTH, 1))
+    return C * (H**2 / (H**2 + P**2 + 1e-12))
+
+
+def band_chroma(C: np.ndarray, lo: int, hi: int, normalise: bool) -> np.ndarray:
+    semi = (np.arange(C.shape[0]) + 1) // 3  # semitones above C1 (bin b goes to its nearest semitone)
+    midi = 24 + semi
+    X = np.log1p(LOG_GAIN * C)
+    ch = np.zeros((12, C.shape[1]))
+    for b in np.where((midi >= lo) & (midi <= hi))[0]:
+        ch[semi[b] % 12] += X[b]
+    if normalise:
+        ch = ch / np.maximum(ch.max(axis=0, keepdims=True), 1e-30)
+    return ch
+
+
+def centred(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    c = x - x.mean(axis=0, keepdims=True)
+    n = np.linalg.norm(c, axis=0, keepdims=True)
+    return c / (n + 1e-9), n[0]
+
+
+def chords(treble_b: np.ndarray, bass_b: np.ndarray, beats: np.ndarray) -> list[dict]:
     templates, labels = [], []
     for t in range(12):
         for q, iv in (("maj", (0, 4, 7)), ("min", (0, 3, 7))):
@@ -57,11 +90,15 @@ def chords(chroma_b: np.ndarray, beats: np.ndarray) -> list[dict]:
             labels.append((NAMES[t], q))
     T = np.array(templates)
     # Centred correlation: chroma is all positive, so a plain cosine favours flat templates.
-    c = chroma_b - chroma_b.mean(axis=0, keepdims=True)
-    c /= np.linalg.norm(c, axis=0, keepdims=True) + 1e-9
+    c, _ = centred(treble_b)
     score = T @ c  # (24, nbeats), in [-1, 1]
+    # The bass names the root: mix in the centred bass chroma at each chord's root (left out where the bass is flat).
+    cb, nb_ = centred(bass_b)
+    roots = np.array([t for t in range(12) for _ in range(2)])
+    w = np.where(nb_ > 1e-6, BASS_WEIGHT, 0.0)
+    score = (score + w * cb[roots]) / (1 + w)
     # No-chord scores a constant: it wins only where no triad correlates well.
-    score = np.vstack([score, np.full((1, score.shape[1]), 0.3)])
+    score = np.vstack([score, np.full((1, score.shape[1]), NO_CHORD)])
     labels.append(("N", "N"))
     prob = np.exp(8 * score)
     prob /= prob.sum(axis=0, keepdims=True)
@@ -77,8 +114,8 @@ def chords(chroma_b: np.ndarray, beats: np.ndarray) -> list[dict]:
     return out
 
 
-def sections(y: np.ndarray, beat_frames: np.ndarray, downbeat_idx: np.ndarray, nb: int) -> dict:
-    C = librosa.amplitude_to_db(np.abs(librosa.cqt(y=y, sr=SR, hop_length=HOP, bins_per_octave=36, n_bins=252)), ref=np.max)
+def sections(Cmag: np.ndarray, y: np.ndarray, beat_frames: np.ndarray, downbeat_idx: np.ndarray, nb: int) -> dict:
+    C = librosa.amplitude_to_db(Cmag, ref=np.max)
     Csync = librosa.util.sync(C, beat_frames, aggregate=np.median)
     mfcc = librosa.feature.mfcc(y=y, sr=SR, hop_length=HOP)
     Msync = librosa.util.sync(mfcc, beat_frames)
@@ -134,8 +171,12 @@ def main() -> None:
         beats = np.array(b["beats"])
         downs = np.array(b["downbeats"])
         beat_frames = librosa.time_to_frames(beats, sr=SR, hop_length=HOP)
-        chroma = librosa.feature.chroma_cqt(y=y, sr=SR, hop_length=HOP)
-        chroma_b = librosa.util.sync(chroma, beat_frames, aggregate=np.median)
+        Cmag = np.abs(librosa.cqt(y=y, sr=SR, hop_length=HOP, bins_per_octave=36, n_bins=252))
+        Hc = harmonic_cqt(Cmag)
+        sync = lambda X: librosa.util.sync(X, beat_frames, aggregate=np.median)  # noqa: E731
+        chroma_b = sync(band_chroma(Hc, *KEY_BAND, normalise=True))
+        treble_b = sync(band_chroma(Hc, *TREBLE, normalise=False))
+        bass_b = sync(band_chroma(Hc, *BASS, normalise=False))
         nb = chroma_b.shape[1]
         downbeat_idx = np.array([int(np.argmin(np.abs(beats - d))) for d in downs])
         key, r = ks_key(chroma_b.sum(axis=1))
@@ -151,14 +192,14 @@ def main() -> None:
             "beatsUsed": int(nb),
             "beats": [round(float(t), 5) for t in beats],
             "downbeatBeats": [int(i) for i in downbeat_idx],
-            # chromaBeats[i] = the 12-bin chroma (C..B, max-normalised per frame by librosa) of beat i, median over the
+            # chromaBeats[i] = the 12-bin key chroma (C..B, harmonic, log, treble, max-normalised per frame) of beat i, median over the
             # frames from beat i to beat i+1 (librosa.util.sync with the beat frames; the first entry covers the frames
             # before the first beat, so entry i+1 is beat i).
             "chromaBeats": [[round(float(v), 4) for v in col] for col in chroma_b.T],
             "key": {"key": key, "r": round(r, 3)},
             "keyWindows": windows,
-            "chords": chords(chroma_b, beats),
-            "sections": sections(y, beat_frames, downbeat_idx, nb),
+            "chords": chords(treble_b, bass_b, beats),
+            "sections": sections(Cmag, y, beat_frames, downbeat_idx, nb),
             "librosa": librosa.__version__,
             "seconds": None,
         }

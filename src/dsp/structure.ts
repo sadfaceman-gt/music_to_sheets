@@ -1,6 +1,7 @@
 /**
  * Key, chords and sections on a beat grid (M2c, Design 5.3, 5.4): beat-synchronous CQT chroma from the mix;
- * Krumhansl-Schmuckler key, whole song and in 16-bar windows; 24 major/minor templates plus no-chord with Viterbi
+ * Krumhansl-Schmuckler key, whole song and in 16-bar windows (both on the harmonic, log-compressed treble chroma since
+ * the cycle 6 review, T39); chords from treble and bass chroma; 24 major/minor templates plus no-chord with Viterbi
  * smoothing; Laplacian structural segmentation snapped to downbeats (at least MIN_SECTION_BARS bars); names from
  * repetition, loudness and position (no vocals until M3). Pure and deterministic.
  *
@@ -11,7 +12,7 @@
 import { MIN_SECTION_BARS } from '../core/analysis/types.ts';
 import type { BeatGrid, ChordSpan, KeySpan, MusicalKey, ProgressCallback, SectionSpan, StageProgress } from '../core/analysis/types.ts';
 import { cqt } from './cqt.ts';
-import { FEATURE_HOP, beatFrameRanges, chromaFromCqt, syncFeature } from './chroma.ts';
+import { FEATURE_HOP, beatFrameRanges, harmonyFeatures, syncFeature } from './chroma.ts';
 import { analyzeKeys } from './key.ts';
 import { analyzeChords } from './chords.ts';
 import { frameFeatures } from './mfcc.ts';
@@ -54,15 +55,15 @@ export function analyzeStructure(mono: Float32Array, sampleRate: number, grid: B
   report('chroma', 0);
   const c = cqt(mono, sampleRate, { hop: FEATURE_HOP, onProgress: (f) => report('chroma', f * SHARE.chroma * 0.95) });
   const ranges = beatFrameRanges(beats, sampleRate, FEATURE_HOP, c.frames);
-  const chroma = syncFeature(chromaFromCqt(c), 12, ranges, 'median');
+  const harmony = harmonyFeatures(c, ranges);
   check();
 
   report('key', SHARE.chroma);
-  const { songKey, keys } = analyzeKeys(chroma, grid.downbeats, at);
+  const { songKey, keys } = analyzeKeys(harmony.key, grid.downbeats, at);
   check();
 
   report('chords', SHARE.key);
-  const chords = analyzeChords(chroma, at);
+  const chords = analyzeChords(harmony.treble, at, harmony.bass);
   check();
 
   report('sections', SHARE.chords);

@@ -1,14 +1,24 @@
 /**
  * Chords at beat resolution (M2c, Design 5.3), as the reference (tools/structure-ref/reference.py): 24 major and
- * minor triad templates scored by centred correlation with each beat's chroma (chroma is all positive, so a plain
+ * minor triad templates scored by centred correlation with each beat's treble chroma, plus the bass chroma at the
+ * chord's root (cycle 6 review, T39) (chroma is all positive, so a plain
  * cosine would favour flat templates), a no-chord state with a constant score, and Viterbi smoothing with
  * observation likelihood exp(CHORD_SHARPNESS * score) (normalised per beat) and a uniform-switch transition matrix
  * with self-transition CHORD_SELF_PROB (librosa.sequence.transition_loop). Pure.
  */
 import type { ChordQuality, ChordSpan, PitchClass } from '../core/analysis/types.ts';
 
-/** Score of the no-chord state: it wins only where no triad correlates better. */
-export const NO_CHORD_SCORE = 0.3;
+/**
+ * Score of the no-chord state: it wins only where no triad correlates better. 0.15 since the cycle 6 review (T39):
+ * at the reference's 0.3 quiet or sparse passages with a clear harmony (Best Day Of My Life's verse) showed no chord.
+ */
+export const NO_CHORD_SCORE = 0.15;
+/**
+ * Weight of the bass term (T39): a chord's score is (treble correlation + BASS_WEIGHT * bass root salience) /
+ * (1 + BASS_WEIGHT). The bass names the root far more reliably than the treble, where triads that share two notes
+ * (G and Em, G and C) look alike under a vocal line.
+ */
+export const BASS_WEIGHT = 0.5;
 /** Observation sharpness and self-transition probability (the reference's values). */
 export const CHORD_SHARPNESS = 8;
 export const CHORD_SELF_PROB = 0.9;
@@ -41,26 +51,41 @@ const TEMPLATES: Float64Array[] = CHORD_STATES.slice(0, 24).map(({ root, quality
   return v;
 });
 
-/** Scores (25 per beat, beat-major): template correlations in -1..1, then NO_CHORD_SCORE. */
-export function chordScores(chroma: Float32Array[]): Float64Array {
+/** A chroma centred (mean 0) and scaled to unit norm, into out; returns the norm before scaling (0 for flat input). */
+function centre(v: ArrayLike<number>, out: Float64Array): number {
+  let mean = 0;
+  for (let i = 0; i < 12; i++) mean += v[i]!;
+  mean /= 12;
+  let norm = 0;
+  for (let i = 0; i < 12; i++) {
+    out[i] = v[i]! - mean;
+    norm += out[i]! ** 2;
+  }
+  norm = Math.sqrt(norm);
+  const s = 1 / (norm + 1e-9); // facts-ok: as the reference's epsilon
+  for (let i = 0; i < 12; i++) out[i] = out[i]! * s;
+  return norm;
+}
+
+/**
+ * Scores (25 per beat, beat-major): template correlations with the treble chroma in -1..1, mixed with the bass
+ * chroma's centred value at each chord's root (BASS_WEIGHT; left out on a beat whose bass is flat or silent, or when
+ * `bass` is not given), then NO_CHORD_SCORE.
+ */
+export function chordScores(treble: Float32Array[], bass?: Float32Array[], bassWeight = BASS_WEIGHT): Float64Array {
   const s = CHORD_STATES.length;
-  const out = new Float64Array(chroma.length * s);
+  const out = new Float64Array(treble.length * s);
   const c = new Float64Array(12);
-  chroma.forEach((v, b) => {
-    let mean = 0;
-    for (let i = 0; i < 12; i++) mean += v[i]!;
-    mean /= 12;
-    let norm = 0;
-    for (let i = 0; i < 12; i++) {
-      c[i] = v[i]! - mean;
-      norm += c[i]! ** 2;
-    }
-    norm = Math.sqrt(norm) + 1e-9; // facts-ok: as the reference's epsilon
+  const cb = new Float64Array(12);
+  treble.forEach((v, b) => {
+    centre(v, c);
+    const bv = bass?.[b];
+    const w = bv !== undefined && centre(bv, cb) > 1e-6 ? bassWeight : 0; // facts-ok: a flat bass says nothing
     for (let k = 0; k < 24; k++) {
       const t = TEMPLATES[k]!;
       let d = 0;
       for (let i = 0; i < 12; i++) d += t[i]! * c[i]!;
-      out[b * s + k] = d / norm;
+      out[b * s + k] = w > 0 ? (d + w * cb[CHORD_STATES[k]!.root!]!) / (1 + w) : d;
     }
     out[b * s + 24] = NO_CHORD_SCORE;
   });
@@ -121,11 +146,11 @@ export function viterbiPath(scores: Float64Array, nStates: number, selfProb = CH
  * run (clamped to 0..1; no-chord's is NO_CHORD_SCORE). `beatTime(i)` gives beat i's time (beats count = the end);
  * the first chord starts at the first beat (the audio before it has no beat to hold a chord).
  */
-export function analyzeChords(chroma: Float32Array[], beatTime: (i: number) => number): ChordSpan[] {
+export function analyzeChords(chroma: Float32Array[], beatTime: (i: number) => number, bass?: Float32Array[]): ChordSpan[] {
   const n = chroma.length;
   if (n === 0) return [];
   const ns = CHORD_STATES.length;
-  const scores = chordScores(chroma);
+  const scores = chordScores(chroma, bass);
   const path = viterbiPath(scores, ns);
   const out: ChordSpan[] = [];
   for (let s = 0, i = 1; i <= n; i++) {

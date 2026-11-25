@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { beatChroma } from '../../src/dsp/chroma.ts';
+import { beatHarmony } from '../../src/dsp/chroma.ts';
 import { analyzeStructure } from '../../src/dsp/structure.ts';
 import { chordName, keyName } from '../../src/core/analysis/music.ts';
 import type { BeatGrid } from '../../src/core/analysis/types.ts';
@@ -53,8 +53,8 @@ describe.skipIf(files.length === 0)('key, chords and sections against librosa (l
         const downbeats = [...new Set(ref.downbeatBeats)].sort((a, b) => a - b);
         const grid: BeatGrid = { beats: ref.beats, downbeats, meter: downbeats.length ? [{ startBeat: downbeats[0]!, signature: { num: 4, den: 4 }, beatsPerBar: 4 }] : [] };
 
-        // Chroma agreement: our beat i <-> reference column i + 1.
-        const chroma = beatChroma(mono, 22050, ref.beats);
+        // Key-chroma agreement (harmonic, log, treble; T39): our beat i <-> reference column i + 1.
+        const chroma = beatHarmony(mono, 22050, ref.beats).key;
         let cosSum = 0;
         for (let i = 0; i < chroma.length; i++) cosSum += cosine(chroma[i]!, ref.chromaBeats[i + 1]!);
         const chromaCos = cosSum / chroma.length;
