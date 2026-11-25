@@ -92,24 +92,34 @@ test.describe('A B A B song', () => {
     expect(s0.length).toBeGreaterThanOrEqual(3);
     const n0 = s0.length;
 
-    // 1. Drag boundary 1 two bars later with the pointer.
-    const from1 = s0[1]!.start;
+    // The real segmentation can give 4-bar sections, the minimum, so no boundary can move yet: merge twice first to
+    // make room (section 0 becomes at least 12 bars).
+    // 1. Merge the first section with the next, twice.
+    await select(page, 0);
+    await page.getByTestId('section-merge').click();
+    await expect.poll(async () => (await ana.sections(page)).length).toBe(n0 - 1);
+    await select(page, 0);
+    await page.getByTestId('section-merge').click();
+    await expect.poll(async () => (await ana.sections(page)).length).toBe(n0 - 2);
+
+    // 2. Drag boundary 1 two bars earlier with the pointer.
+    const from1 = (await ana.sections(page))[1]!.start;
     const handle = page.getByTestId('section-boundary-1');
     const hb = (await handle.boundingBox())!;
     await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
     await page.mouse.down();
-    const toX = await timelineX(page, from1 + 2 * BAR);
+    const toX = await timelineX(page, from1 - 2 * BAR);
     await page.mouse.move(toX, hb.y + hb.height / 2, { steps: 10 });
     await page.mouse.up();
-    await expect.poll(async () => (await ana.sections(page))[1]!.start).toBeCloseTo(from1 + 2 * BAR, 0);
-    expect(await ana.sectionEdits(page)).toHaveLength(1);
+    await expect.poll(async () => (await ana.sections(page))[1]!.start).toBeCloseTo(from1 - 2 * BAR, 0);
+    expect(await ana.sectionEdits(page)).toHaveLength(3);
 
-    // 2. moveBoundary: boundary 2 two bars earlier.
+    // 3. moveBoundary: boundary 2 two bars earlier (section 1 gained two bars in step 2).
     const from2 = (await ana.sections(page))[2]!.start;
     await ana.moveBoundary(page, 2, from2 - 2 * BAR);
     await expect.poll(async () => (await ana.sections(page))[2]!.start).toBeCloseTo(from2 - 2 * BAR, 0);
 
-    // 3. Split the longest section at the playhead.
+    // 4. Split the longest section at the playhead.
     const now = await ana.sections(page);
     const longest = now.reduce((best, s, i) => (s.end - s.start > now[best]!.end - now[best]!.start ? i : best), 0);
     const sl = now[longest]!;
@@ -117,14 +127,10 @@ test.describe('A B A B song', () => {
     await select(page, longest);
     await expect(page.getByTestId('section-split')).toBeEnabled();
     await page.getByTestId('section-split').click();
-    await expect.poll(async () => (await ana.sections(page)).length).toBe(n0 + 1);
+    await expect.poll(async () => (await ana.sections(page)).length).toBe(n0 - 1);
 
-    // 4. Merge the first section with the next.
+    // 5. Rename the first section: one click, no "?" any more.
     await select(page, 0);
-    await page.getByTestId('section-merge').click();
-    await expect.poll(async () => (await ana.sections(page)).length).toBe(n0);
-
-    // 5. Rename it: one click, no "?" any more.
     await expect(page.getByTestId('section-rename')).toBeVisible();
     await page.getByTestId('section-rename-bridge').click();
     await expect.poll(async () => (await ana.sections(page))[0]!.label).toBe('bridge');
@@ -137,7 +143,7 @@ test.describe('A B A B song', () => {
 
     const sections = await ana.sections(page);
     const edits = await ana.sectionEdits(page);
-    expect(edits.map((e) => e.kind)).toEqual(['move', 'move', 'split', 'merge', 'rename']);
+    expect(edits.map((e) => e.kind)).toEqual(['merge', 'merge', 'move', 'move', 'split', 'rename']);
 
     await saveAndReload(page);
     expect(await ana.sections(page)).toEqual(sections);
