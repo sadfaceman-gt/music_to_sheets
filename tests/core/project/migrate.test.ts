@@ -30,7 +30,7 @@ describe('parseProject migration', () => {
     expect(p.tracker).toBe('dsp');
     expect(p.trackers.dsp.corrections).toEqual(corrections);
     expect(p.trackers.dsp.analysisKey).toBeNull();
-    expect(p.trackers['beatthis-small0']).toEqual({ analysisKey: null, corrections: [], keyOverride: null, sectionEdits: [] });
+    expect(p.trackers['beatthis-small0']).toEqual({ analysisKey: null, corrections: [] });
     expect(p.tempoBpm).toBe(120);
     expect(p).not.toHaveProperty('corrections');
     expect(p).not.toHaveProperty('analysisKey');
@@ -38,20 +38,50 @@ describe('parseProject migration', () => {
 
   it('leaves a current record unchanged', () => {
     const cur = parseProject(v1Record());
-    const state = { analysisKey: 'k', corrections, keyOverride: { tonic: 11 as const, mode: 'minor' as const }, sectionEdits: [{ kind: 'split' as const, at: 12 }] };
-    const again = parseProject({ ...cur, tracker: 'dsp', trackers: { ...emptyTrackers(), dsp: state } });
+    const state = { analysisKey: 'k', corrections };
+    const timeline = {
+      key: [{ id: 1, row: 'key' as const, start: 0, end: 20, reviewed: true, name: { tonic: { letter: 'B' as const, accidental: 'b' as const }, mode: 'major' as const } }],
+      chord: [{ id: 2, row: 'chord' as const, start: 0, end: 20, reviewed: false, name: { kind: 'chord' as const, root: { letter: 'D' as const, accidental: '' as const }, quality: 'min' as const, extension: '7' as const, alterations: ['b5' as const], bass: { letter: 'F' as const, accidental: '#' as const } } }],
+      section: [{ id: 3, row: 'section' as const, start: 0, end: 20, reviewed: false, name: null }],
+      nextId: 4,
+    };
+    const again = parseProject({ ...cur, tracker: 'dsp', trackers: { ...emptyTrackers(), dsp: state }, timeline, finishedAt: 5 });
+    expect(again.timeline).toEqual(timeline);
+    expect(again.finishedAt).toBe(5);
     expect(again.tracker).toBe('dsp');
     expect(again.trackers.dsp).toEqual(state);
     expect(parseProject(again)).toEqual(again);
   });
 
-  it('migrates a v2 record to v3: corrections kept, analysis keys dropped, no key override or section edits', () => {
+  it('migrates a v2 record through v3 to v4: corrections kept, analysis keys dropped, no key override or section edits', () => {
     const v2 = { ...parseProject(v1Record()), schemaVersion: 2, tracker: 'dsp', trackers: { 'beatthis-small0': { analysisKey: 'a', corrections: [] }, dsp: { analysisKey: 'b', corrections } } };
     const p = parseProject(v2);
     expect(p.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
     expect(p.tracker).toBe('dsp');
-    expect(p.trackers.dsp).toEqual({ analysisKey: null, corrections, keyOverride: null, sectionEdits: [] });
-    expect(p.trackers['beatthis-small0']).toEqual({ analysisKey: null, corrections: [], keyOverride: null, sectionEdits: [] });
+    expect(p.trackers.dsp).toEqual({ analysisKey: null, corrections });
+    expect(p.trackers['beatthis-small0']).toEqual({ analysisKey: null, corrections: [] });
+  });
+
+  it('migrates a v3 record to v4: the shown tracker key pick and section edits become legacyEdits', () => {
+    const v3 = {
+      ...parseProject(v1Record()),
+      schemaVersion: 3,
+      tracker: 'dsp',
+      trackers: {
+        'beatthis-small0': { analysisKey: 'a', corrections: [], keyOverride: { tonic: 2, mode: 'major' }, sectionEdits: [] },
+        dsp: { analysisKey: 'b', corrections, keyOverride: { tonic: 11, mode: 'minor' }, sectionEdits: [{ kind: 'split', at: 12 }] },
+      },
+    };
+    delete (v3 as Record<string, unknown>).timeline;
+    delete (v3 as Record<string, unknown>).legacyEdits;
+    delete (v3 as Record<string, unknown>).finishedAt;
+    const p = parseProject(v3);
+    expect(p.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(p.trackers.dsp).toEqual({ analysisKey: 'b', corrections });
+    expect(p.trackers['beatthis-small0']).toEqual({ analysisKey: 'a', corrections: [] });
+    expect(p.legacyEdits).toEqual({ keyOverride: { tonic: 11, mode: 'minor' }, sectionEdits: [{ kind: 'split', at: 12 }] });
+    expect(p.timeline).toBeNull();
+    expect(p.finishedAt).toBeNull();
   });
 
   it('throws for garbage', () => {
@@ -60,5 +90,6 @@ describe('parseProject migration', () => {
     expect(() => parseProject({ schemaVersion: 1 })).toThrow();
     expect(() => parseProject(v1Record({ corrections: [{ kind: 'bogus' }] }))).toThrow();
     expect(() => parseProject({ schemaVersion: 3 })).toThrow();
+    expect(() => parseProject({ schemaVersion: 4 })).toThrow();
   });
 });

@@ -165,6 +165,9 @@ export function createProjectStore(overrides?: Partial<StoreDeps>): ProjectStore
             peaksKey: first.peaksKey,
             tracker: DEFAULT_TRACKER,
             trackers: emptyTrackers(),
+            timeline: null,
+            legacyEdits: null,
+            finishedAt: null,
             tempoBpm: null,
           });
           await db.projects.put({ ...copy });
@@ -214,6 +217,9 @@ export function createProjectStore(overrides?: Partial<StoreDeps>): ProjectStore
           peaksKey: `peaks:${sha}`,
           tracker: DEFAULT_TRACKER,
           trackers: emptyTrackers(),
+            timeline: null,
+            legacyEdits: null,
+            finishedAt: null,
           tempoBpm: null,
         });
         await db.transaction('rw', db.projects, db.artifacts, async () => {

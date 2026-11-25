@@ -295,5 +295,5 @@ describe('applyCorrections properties', () => {
       }),
       { numRuns: 300 },
     );
-  });
+  }, 30_000); // heavy property test: times out under parallel load at the 5 s default (cycle 6 review)
 });

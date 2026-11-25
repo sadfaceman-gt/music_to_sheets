@@ -30,8 +30,12 @@ import { ProgressBar } from '../ui/ProgressBar.tsx';
 
 type RunState = 'idle' | 'running' | 'done' | 'cancelled' | 'error';
 
-/** The edits saved per tracker. */
-type Edits = Pick<TrackerState, 'corrections' | 'sectionEdits' | 'keyOverride'>;
+/**
+ * The screen's edits. Schema v4 saves only the beat corrections per tracker; the cycle 6 pick key and section edits
+ * are kept in memory until the cycle 7 timeline replaces them (contract stopgap).
+ */
+type Edits = { corrections: Correction[]; sectionEdits: SectionEdit[]; keyOverride: KeyPick | null };
+const editsOf = (s: TrackerState): Edits => ({ corrections: s.corrections, sectionEdits: [], keyOverride: null });
 const NO_EDITS: Edits = { corrections: [], sectionEdits: [], keyOverride: null };
 
 interface Props {
@@ -131,7 +135,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
       if (!p || !a) return;
       const effective = applyCorrections(a.grid, next.corrections, a.durationSec);
       const updated: Project = {
-        ...withTracker(p, p.tracker, { ...activeTracker(p), corrections: next.corrections, sectionEdits: next.sectionEdits, keyOverride: next.keyOverride }),
+        ...withTracker(p, p.tracker, { ...activeTracker(p), corrections: next.corrections }),
         tempoBpm: effective.beats.length > 1 ? gridTempo(effective.beats) : a.tempoBpm,
       };
       setProject(updated);
@@ -166,7 +170,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
       const tracker = result.settings.tracker;
       const effective = applyCorrections(result.grid, edits.corrections, result.durationSec);
       const updated: Project = {
-        ...withTracker(p, tracker, { ...p.trackers[tracker], analysisKey: result.key, corrections: edits.corrections, sectionEdits: edits.sectionEdits, keyOverride: edits.keyOverride }),
+        ...withTracker(p, tracker, { ...p.trackers[tracker], analysisKey: result.key, corrections: edits.corrections }),
         tracker,
         tempoBpm: effective.beats.length > 1 ? gridTempo(effective.beats) : result.tempoBpm,
       };
@@ -199,7 +203,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
           const state = p.trackers[tracker];
           const cached = await store.getAnalysis(state.analysisKey ?? analysisKey(p.source.sha256, settingsFor(tracker)));
           if (cached) {
-            await show(p, cached, state, null);
+            await show(p, cached, editsOf(state), null);
             return true;
           }
         }
@@ -213,7 +217,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
         job.current = null;
         await store.putAnalysis(result);
         const made = result.settings.tracker;
-        await show(p, result, clear && made === tracker ? NO_EDITS : p.trackers[made], reason);
+        await show(p, result, clear && made === tracker ? NO_EDITS : editsOf(p.trackers[made]), reason);
       } catch (e) {
         job.current = null;
         setProgress(null);
