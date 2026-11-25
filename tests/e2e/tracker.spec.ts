@@ -154,3 +154,18 @@ test('a cycle 4 project (schema v1) opens with its corrections on the DSP tracke
   );
   expect(stored).toEqual({ schemaVersion: 2, hasOld: false });
 });
+
+test('T36: switching to a cached tracker while playing carries on playing from the same spot', async ({ page }) => {
+  await openSong(page, song44());
+  await page.getByTestId('tracker-dsp').click();
+  await waitTracker(page, 'dsp');
+  await ana.waitDone(page);
+  await page.getByTestId('play-song').click();
+  await expect.poll(async () => (await ana.playback(page)).songTime ?? 0, { timeout: 30_000 }).toBeGreaterThan(0.3);
+  const before = (await ana.playback(page)).songTime!;
+  await page.getByTestId('tracker-beatthis-small0').click();
+  await waitTracker(page, 'beatthis-small0');
+  await expect.poll(async () => (await ana.playback(page)).playing, { timeout: 10_000 }).toBe(true);
+  expect((await ana.playback(page)).songTime!).toBeGreaterThanOrEqual(before - 0.05);
+  await expect(page.getByTestId('stop-song')).toBeEnabled();
+});

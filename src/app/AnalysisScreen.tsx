@@ -152,10 +152,11 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
   /**
    * Shows `tracker`'s grid: its cached analysis (the project's key, else the key another project for the same song
    * made), or a run. `force` re-runs and, with `clear`, drops that tracker's corrections. A Beat This! run that
-   * falls back to DSP is stored under the DSP tracker only.
+   * falls back to DSP is stored under the DSP tracker only. Resolves true when the cached analysis was shown
+   * (no run), so a caller can carry on playing.
    */
   const load = useCallback(
-    async (p: Project, tracker: BeatTracker, force: boolean, clear: boolean) => {
+    async (p: Project, tracker: BeatTracker, force: boolean, clear: boolean): Promise<boolean> => {
       setTarget(tracker);
       setError(null);
       try {
@@ -164,7 +165,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
           const cached = await store.getAnalysis(state.analysisKey ?? analysisKey(p.source.sha256, settingsFor(tracker)));
           if (cached) {
             await show(p, cached, state.corrections, null);
-            return;
+            return true;
           }
         }
         setRunState('running');
@@ -188,6 +189,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
           setError(e instanceof Error ? e.message : String(e));
         }
       }
+      return false;
     },
     [store, show],
   );
@@ -265,10 +267,10 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
     return () => cancelAnimationFrame(raf);
   }, [playing]);
 
-  const play = useCallback(async () => {
+  const play = useCallback(async (resumeAt?: number) => {
     const p = getPlayer();
     p.ensureContext();
-    const from = live.current.playhead >= live.current.durationSec - 0.05 ? 0 : live.current.playhead; // facts-ok: seconds
+    const from = resumeAt ?? (live.current.playhead >= live.current.durationSec - 0.05 ? 0 : live.current.playhead); // facts-ok: seconds
     await p.play(from);
     setPlaying(true);
   }, [getPlayer]);
@@ -376,10 +378,14 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed }: Props) 
   const switchTracker = (tracker: BeatTracker) => {
     const p = live.current.project;
     if (!p || live.current.runState === 'running') return;
+    // Playing and the other grid is cached: carry on from the same spot so the two can be compared by ear.
+    const was = player.current?.isPlaying() ? player.current.position() : null;
     stop();
     setConfirmRerun(false);
     void autosave.current?.flush();
-    void load(p, tracker, false, false);
+    void load(p, tracker, false, false).then((cached) => {
+      if (cached && was !== null && live.current.grid) void play(was);
+    });
   };
 
   const ready = grid !== null && analysis !== null;
