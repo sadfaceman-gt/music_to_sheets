@@ -134,7 +134,7 @@ test('a cycle 4 project (schema v1) opens with its corrections on the DSP tracke
   expect(await ana.corrections(page)).toEqual([{ kind: 'double' }]);
   // n0 counts Beat This! beats; the DSP grid can have a few more or fewer edge beats, so x2 shows as about 1.9.
   expect((await ana.grid(page))!.beats.length / n0).toBeGreaterThan(1.7);
-  // Saving rewrites it as the current schema (v3).
+  // Saving rewrites it as the current schema (v4).
   await page.getByTestId('nudge-p10').click();
   await page.waitForTimeout(2500);
   const stored = await page.evaluate(
@@ -152,7 +152,7 @@ test('a cycle 4 project (schema v1) opens with its corrections on the DSP tracke
         };
       }),
   );
-  expect(stored).toEqual({ schemaVersion: 3, hasOld: false });
+  expect(stored).toEqual({ schemaVersion: 4, hasOld: false });
 });
 
 test('T36: switching to a cached tracker while playing carries on playing from the same spot', async ({ page }) => {
