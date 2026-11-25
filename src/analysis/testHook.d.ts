@@ -29,7 +29,7 @@ export interface MtsAnalysisHook {
   /** Replaces the timeline as one undo step (tests and the performance check). */
   setTimeline(tl: Timeline): void;
   getFinishedAt(): number | null;
-  /** Pixel x of a time on the timeline rows (from their left edge) and back. */
+  /** Pixel x of a time on the timeline rows (from the left edge of a row element, inside the rows' border) and back. */
   timeToX(sec: number): number;
   xToTime(px: number): number;
 }

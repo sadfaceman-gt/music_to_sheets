@@ -32,20 +32,22 @@ export const TimelineToolbar = memo(function TimelineToolbar(p: Props) {
         const isMode = t.id === 'select' || t.id === 'split';
         const active = isMode && p.mode === t.id;
         const gap = t.id === 'merge' || t.id === 'double';
+        // aria-disabled, not disabled: a tool that can't act now can still be right-clicked to bind its key.
+        const enabled = p.enabled(t.id);
         return (
           <button
             key={t.id}
             type="button"
             data-testid={`tool-${t.id}`}
             aria-pressed={isMode ? active : undefined}
-            disabled={!p.enabled(t.id)}
+            aria-disabled={!enabled}
             title={`${t.title}${key ? ` (${key.toUpperCase()})` : ''}. Right-click to set a shortcut key`}
-            onClick={() => p.onTool(t.id)}
+            onClick={() => enabled && p.onTool(t.id)}
             onContextMenu={(e) => {
               e.preventDefault();
               p.onListen(id);
             }}
-            className={`${btnBase} ${gap ? 'ml-3' : ''} ${
+            className={`${btnBase} ${gap ? 'ml-3' : ''} ${enabled ? '' : 'opacity-40'} ${
               p.listeningId === id ? 'bg-slate-800 ring-2 ring-amber-400' : active ? 'bg-sky-600 font-semibold text-white ring-2 ring-sky-300' : 'bg-slate-800 hover:bg-slate-700'
             }`}
           >

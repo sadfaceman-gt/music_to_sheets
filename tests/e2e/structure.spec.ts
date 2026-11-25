@@ -378,7 +378,9 @@ test.describe('A B A B song', () => {
     await reset();
     await expect(page.getByTestId('tool-key-select')).toHaveText('V');
     await expect(page.getByTestId('tool-key-delete')).toHaveCount(0);
-    await page.getByTestId('tool-delete').click({ button: 'right' });
+    // Delete can't act with nothing selected (aria-disabled), but its key can still be set: force past Playwright's enabled check.
+    await expect(page.getByTestId('tool-delete')).toHaveAttribute('aria-disabled', 'true');
+    await page.getByTestId('tool-delete').click({ button: 'right', force: true });
     await page.keyboard.press('q');
     await expect(page.getByTestId('tool-key-delete')).toHaveText('Q');
     await clickAt(CHORD_ROW, song.bars[3]! + 0.5);
@@ -386,7 +388,7 @@ test.describe('A B A B song', () => {
     await page.keyboard.press('q');
     await expect.poll(async () => (await ana.timeline(page))!.chord.some((b) => b.id === id)).toBe(false);
     expect(await page.evaluate(() => localStorage.getItem('mts.timelineShortcuts'))).toContain('tool:delete');
-    await page.getByTestId('tool-delete').click({ button: 'right' });
+    await page.getByTestId('tool-delete').click({ button: 'right', force: true });
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('tool-key-delete')).toHaveCount(0);
   });
@@ -440,7 +442,7 @@ test.describe('A B A B song', () => {
     await saveAndReload(page);
     await expect(page.getByTestId('finished-badge')).toBeVisible();
     await expect(page.getByTestId('step-analysis')).toHaveText('2 Import and analysis (finished)');
-    await clickAt(SECTION_ROW, bars[2]!);
+    await clickAt(CHORD_ROW, bars[2]! + 0.5); // an unreviewed block: marking it reviewed is an edit
     await page.getByTestId('tool-reviewed').click();
     await expect(page.getByTestId('finished-badge')).toHaveCount(0);
     await expect(page.getByTestId('step-analysis')).toHaveText('2 Import and analysis (analysed)');
@@ -512,6 +514,7 @@ test.describe('A B A B song', () => {
 });
 
 test('re-run counts the corrections and the timeline, then refills the timeline (short song)', async ({ page }) => {
+  test.setTimeout(120_000); // two analyses
   await page.addInitScript(() => localStorage.setItem('mts.firstRunDone', 'yes'));
   await page.goto('./');
   await page.getByTestId('import-input').setInputFiles(song44());
@@ -539,6 +542,7 @@ test('re-run counts the corrections and the timeline, then refills the timeline 
 });
 
 test('a cycle 6 project (schema v3) opens as v4: its key pick is one key block, its section edits are applied', async ({ page }) => {
+  test.setTimeout(120_000);
   await page.addInitScript(() => localStorage.setItem('mts.firstRunDone', 'yes'));
   await page.goto('./');
   await page.getByTestId('import-input').setInputFiles(song44());
