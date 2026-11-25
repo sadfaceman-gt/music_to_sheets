@@ -7,8 +7,9 @@
  * CONTRACT (cycle 7): signature fixed; 7-timeline owns the body and its tests (this first version is the orchestrator's).
  */
 import { applySectionEdits, spansOnGrid } from '../analysis/sections.ts';
-import type { Analysis, BeatGrid, KeyMode, PitchClass, SectionEdit } from '../analysis/types.ts';
+import type { Analysis, BeatGrid, KeyMode, PitchClass, SectionEdit, Span } from '../analysis/types.ts';
 import { chordFromDetected, keyFromDetected } from './chords.ts';
+import { TIME_EPS } from './types.ts';
 import type { ChordBlock, KeyBlock, KeyName, SectionBlock, Timeline } from './types.ts';
 
 /** A schema v3 project's edits of its shown tracker, kept until the first timeline is seeded (schema v4 `legacyEdits`). */
@@ -17,14 +18,35 @@ export interface LegacyEdits {
   sectionEdits: SectionEdit[];
 }
 
+/**
+ * The spans as a valid row: sorted by start, clipped to [0, durationSec], each starting no earlier than the previous
+ * one's end, and longer than TIME_EPS (shorter ones are dropped). Detection gives such spans already; this keeps the
+ * timeline's invariants when it doesn't (a stored analysis, a span past a shortened song).
+ */
+function tidy<T extends Span>(spans: readonly T[], dur: number): T[] {
+  const out: T[] = [];
+  let prevEnd = 0;
+  for (const s of [...spans].sort((a, b) => a.start - b.start)) {
+    const start = Math.max(s.start, prevEnd, 0);
+    const end = Math.min(s.end, dur);
+    if (!(end - start > TIME_EPS)) continue;
+    out.push({ ...s, start, end });
+    prevEnd = end;
+  }
+  return out;
+}
+
 export function seedTimeline(analysis: Analysis, grid: BeatGrid, legacy: LegacyEdits | null): Timeline {
   const dur = analysis.durationSec;
   let nextId = 1;
-  const keyBlocks: KeyBlock[] = legacy?.keyOverride
-    ? [{ id: nextId++, row: 'key', start: 0, end: dur, reviewed: false, name: keyFromDetected(legacy.keyOverride.tonic, legacy.keyOverride.mode) }]
-    : spansOnGrid(analysis.keys, grid).map((k) => ({ id: nextId++, row: 'key', start: k.start, end: k.end, reviewed: false, name: keyFromDetected(k.tonic, k.mode) }));
+  const keySpans = legacy?.keyOverride
+    ? dur > TIME_EPS
+      ? [{ start: 0, end: dur, tonic: legacy.keyOverride.tonic, mode: legacy.keyOverride.mode }]
+      : []
+    : tidy(spansOnGrid(analysis.keys, grid), dur);
+  const keyBlocks: KeyBlock[] = keySpans.map((k) => ({ id: nextId++, row: 'key', start: k.start, end: k.end, reviewed: false, name: keyFromDetected(k.tonic, k.mode) }));
   const keyAt = (t: number): KeyName | null => keyBlocks.find((k) => t >= k.start && t < k.end)?.name ?? keyBlocks[0]?.name ?? null;
-  const chordBlocks: ChordBlock[] = spansOnGrid(analysis.chords, grid).map((c) => ({
+  const chordBlocks: ChordBlock[] = tidy(spansOnGrid(analysis.chords, grid), dur).map((c) => ({
     id: nextId++,
     row: 'chord',
     start: c.start,
@@ -34,6 +56,6 @@ export function seedTimeline(analysis: Analysis, grid: BeatGrid, legacy: LegacyE
   }));
   const detected = spansOnGrid(analysis.sections, grid);
   const sections = legacy && legacy.sectionEdits.length > 0 ? applySectionEdits(detected, legacy.sectionEdits, grid, dur) : detected;
-  const sectionBlocks: SectionBlock[] = sections.map((s) => ({ id: nextId++, row: 'section', start: s.start, end: s.end, reviewed: false, name: s.label }));
+  const sectionBlocks: SectionBlock[] = tidy(sections, dur).map((s) => ({ id: nextId++, row: 'section', start: s.start, end: s.end, reviewed: false, name: s.label }));
   return { key: keyBlocks, chord: chordBlocks, section: sectionBlocks, nextId };
 }
