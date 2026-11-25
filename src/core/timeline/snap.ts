@@ -26,9 +26,10 @@ function lowerBound(xs: readonly number[], t: number): number {
 }
 
 /** The targets for a mode, with the song's start and end: [0, ...bars or beats, durationSec]. */
-function targets(g: SnapGrid, mode: SnapMode): number[] {
+export function snapTargets(g: SnapGrid, mode: SnapMode): number[] {
   return [0, ...(mode === 'bar' ? g.bars : g.beats), g.durationSec];
 }
+const targets = snapTargets;
 
 /** The nearest snap target to t (clamped into the song). */
 export function snapTime(t: number, g: SnapGrid, mode: SnapMode): number {

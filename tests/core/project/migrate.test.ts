@@ -84,6 +84,29 @@ describe('parseProject migration', () => {
     expect(p.finishedAt).toBeNull();
   });
 
+  it('migrates a v1 record all the way to v4 with no timeline and no legacy edits', () => {
+    const p = parseProject(v1Record());
+    expect(p.timeline).toBeNull();
+    expect(p.legacyEdits).toBeNull();
+    expect(p.finishedAt).toBeNull();
+  });
+
+  it('gives null legacyEdits for a v3 record whose shown tracker has no key pick or section edits, and keeps a key pick alone', () => {
+    const base = { ...parseProject(v1Record()), schemaVersion: 3, tracker: 'beatthis-small0' };
+    const st = (keyOverride: unknown, sectionEdits: unknown[]) => ({ analysisKey: null, corrections: [], keyOverride, sectionEdits });
+    const none = parseProject({ ...base, trackers: { 'beatthis-small0': st(null, []), dsp: st({ tonic: 1, mode: 'major' }, [{ kind: 'merge', at: 3 }]) } });
+    expect(none.legacyEdits).toBeNull();
+    const pick = parseProject({ ...base, trackers: { 'beatthis-small0': st({ tonic: 7, mode: 'minor' }, []), dsp: st(null, []) } });
+    expect(pick.legacyEdits).toEqual({ keyOverride: { tonic: 7, mode: 'minor' }, sectionEdits: [] });
+  });
+
+  it('migrates a v3 record with missing tracker fields', () => {
+    const base = { ...parseProject(v1Record()), schemaVersion: 3, tracker: 'dsp' };
+    const p = parseProject({ ...base, trackers: { 'beatthis-small0': { analysisKey: 'a', corrections: [] }, dsp: { corrections: [{ kind: 'half' }] } } });
+    expect(p.trackers.dsp).toEqual({ analysisKey: null, corrections: [{ kind: 'half' }] });
+    expect(p.legacyEdits).toBeNull();
+  });
+
   it('throws for garbage', () => {
     expect(() => parseProject(null)).toThrow();
     expect(() => parseProject('x')).toThrow();
