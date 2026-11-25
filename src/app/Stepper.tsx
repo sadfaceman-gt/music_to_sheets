@@ -5,16 +5,18 @@ interface Props {
   /** The project the Import and analysis step opens, or null while none is open. */
   openProjectId: string | null;
   analysed: boolean;
+  /** Finish analysis passed and nothing changed since (project.finishedAt, Design 5.5). */
+  finished: boolean;
   onNavigate: (route: Route) => void;
 }
 
 /** Header stepper: 1 Projects, 2 Import and analysis, 3 Editor. */
-export function Stepper({ route, openProjectId, analysed, onNavigate }: Props) {
+export function Stepper({ route, openProjectId, analysed, finished, onNavigate }: Props) {
   const steps = [
     { id: 'projects', label: '1 Projects', current: route.screen === 'projects', disabled: false, go: () => onNavigate({ screen: 'projects' }) },
     {
       id: 'analysis',
-      label: analysed ? '2 Import and analysis (analysed)' : '2 Import and analysis',
+      label: finished ? '2 Import and analysis (finished)' : analysed ? '2 Import and analysis (analysed)' : '2 Import and analysis',
       current: route.screen === 'analysis',
       disabled: openProjectId === null,
       go: () => openProjectId && onNavigate({ screen: 'analysis', id: openProjectId }),

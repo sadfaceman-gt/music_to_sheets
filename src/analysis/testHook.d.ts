@@ -1,6 +1,7 @@
-import type { ChordSpan, KeySpan, LevelFix, SectionEdit, SectionSpan } from '../core/analysis/types.ts';
+import type { ChordSpan, KeySpan, LevelFix, SectionSpan } from '../core/analysis/types.ts';
+import type { Timeline } from '../core/timeline/types.ts';
 
-/** Read-only snapshots set by the Import and analysis screen while mounted (used by Playwright). */
+/** Snapshots set by the Import and analysis screen while mounted (used by Playwright). */
 export interface MtsAnalysisHook {
   getProjectId(): string;
   getGrid(): { beats: number[]; downbeats: number[]; meter: string } | null;
@@ -15,17 +16,22 @@ export interface MtsAnalysisHook {
   getBackend(): 'webgpu' | 'wasm' | null;
   getFallbackReason(): string | null;
   getElapsedMs(): number | null;
-  /** M2c: the effective song key (the pick-key correction, else the detected one). */
+  /** M2c: the detected song key. */
   getSongKey(): { tonic: number; mode: 'major' | 'minor'; name: string } | null;
-  /** Key and chord spans mapped onto the shown grid; the shown sections (with the user's edits). */
+  /** The detected key, chord and section spans mapped onto the shown grid. */
   getKeys(): KeySpan[];
   getChords(): ChordSpan[];
   getSections(): SectionSpan[];
   getLevelFixes(): LevelFix[];
-  getSectionEdits(): SectionEdit[];
-  getKeyOverride(): { tonic: number; mode: 'major' | 'minor' } | null;
-  /** Moves boundary i (between sections i-1 and i) to the downbeat nearest toSec, as a pointer drag would. */
-  moveBoundary(i: number, toSec: number): void;
+  /** M2c cycle 7: the project's Key, chord and section timeline and the selected block ids. */
+  getTimeline(): Timeline | null;
+  getSelection(): number[];
+  /** Replaces the timeline as one undo step (tests and the performance check). */
+  setTimeline(tl: Timeline): void;
+  getFinishedAt(): number | null;
+  /** Pixel x of a time on the timeline rows (from their left edge) and back. */
+  timeToX(sec: number): number;
+  xToTime(px: number): number;
 }
 
 declare global {
