@@ -402,6 +402,102 @@ describe('schema v2 rows (cycle 5 projects)', () => {
   });
 });
 
+describe('schema v3 rows (cycle 6 projects)', () => {
+  beforeEach(() => vi.spyOn(console, 'warn').mockImplementation(() => undefined));
+
+  const corrections = [{ kind: 'double' }, { kind: 'range', start: 8, end: 16, op: 'half' }];
+  const sectionEdits = [
+    { kind: 'move', from: 16, to: 18 },
+    { kind: 'rename', at: 4, label: 'intro' },
+  ];
+
+  /** Rewrites a stored project as a cycle 6 (schema v3) record: a key pick and section edits per tracker, no timeline. */
+  async function asV3(db: MtsDb, id: string, tracker: 'beatthis-small0' | 'dsp'): Promise<void> {
+    const row = (await db.projects.get(id))! as Record<string, unknown>;
+    const { timeline: _tl, legacyEdits: _le, finishedAt: _fa, ...rest } = row;
+    void _tl;
+    void _le;
+    void _fa;
+    await db.projects.put({
+      ...rest,
+      schemaVersion: 3,
+      tracker,
+      trackers: {
+        'beatthis-small0': { analysisKey: 'bt-key', corrections, keyOverride: { tonic: 9, mode: 'minor' }, sectionEdits },
+        dsp: { analysisKey: 'dsp-key', corrections: [], keyOverride: { tonic: 2, mode: 'major' }, sectionEdits: [{ kind: 'split', at: 3 }] },
+      },
+    } as never);
+  }
+
+  it('opens a v3 row as v4 with the shown tracker edits as legacyEdits, and rewrites it as v4 on save', async () => {
+    const { store, db } = setup();
+    const a = (await store.importFile(song('a.mp3', 'a'))).project;
+    await asV3(db, a.id, 'beatthis-small0');
+
+    const opened = (await store.open(a.id))!;
+    expect(opened.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(opened.tracker).toBe('beatthis-small0');
+    expect(opened.trackers['beatthis-small0']).toEqual({ analysisKey: 'bt-key', corrections });
+    expect(opened.trackers.dsp).toEqual({ analysisKey: 'dsp-key', corrections: [] });
+    expect(opened.legacyEdits).toEqual({ keyOverride: { tonic: 9, mode: 'minor' }, sectionEdits });
+    expect(opened.timeline).toBeNull();
+    expect(opened.finishedAt).toBeNull();
+
+    // Opening writes lastOpenedAt back, already as v4; a row that is v3 again is rewritten as v4 by the next save.
+    expect(((await db.projects.get(a.id))! as Record<string, unknown>).schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    await asV3(db, a.id, 'beatthis-small0');
+    await store.save(opened);
+    const raw = (await db.projects.get(a.id))! as Record<string, unknown>;
+    expect(raw.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(raw.legacyEdits).toEqual({ keyOverride: { tonic: 9, mode: 'minor' }, sectionEdits });
+    const trackers = raw.trackers as Record<string, Record<string, unknown>>;
+    expect(trackers['beatthis-small0']).toEqual({ analysisKey: 'bt-key', corrections });
+    expect(trackers.dsp).not.toHaveProperty('keyOverride');
+    expect(trackers.dsp).not.toHaveProperty('sectionEdits');
+    expect(await store.open(a.id)).toEqual({ ...opened, meta: expect.anything() as unknown });
+  });
+
+  it('takes the legacy edits from the shown tracker only', async () => {
+    const { store, db } = setup();
+    const a = (await store.importFile(song('a.mp3', 'a'))).project;
+    await asV3(db, a.id, 'dsp');
+    const opened = (await store.open(a.id))!;
+    expect(opened.tracker).toBe('dsp');
+    expect(opened.legacyEdits).toEqual({ keyOverride: { tonic: 2, mode: 'major' }, sectionEdits: [{ kind: 'split', at: 3 }] });
+    expect(opened.trackers['beatthis-small0'].corrections).toEqual(corrections);
+  });
+
+  it('keeps legacyEdits until a seeded timeline replaces them', async () => {
+    const { store, db } = setup();
+    const a = (await store.importFile(song('a.mp3', 'a'))).project;
+    await asV3(db, a.id, 'beatthis-small0');
+    const opened = (await store.open(a.id))!;
+    const timeline = { key: [], chord: [], section: [{ id: 1, row: 'section' as const, start: 0, end: 1, reviewed: false, name: 'intro' as const }], nextId: 2 };
+    await store.save({ ...opened, timeline, legacyEdits: null });
+    const again = (await store.open(a.id))!;
+    expect(again.timeline).toEqual(timeline);
+    expect(again.legacyEdits).toBeNull();
+    expect(again.trackers['beatthis-small0'].corrections).toEqual(corrections);
+  });
+
+  it('lists mixed v1, v2, v3 and v4 rows as v4', async () => {
+    const { store, db } = setup();
+    const ids = [];
+    for (const name of ['a', 'b', 'c', 'd']) ids.push((await store.importFile(song(`${name}.mp3`, name))).project.id);
+    const row = async (id: string) => (await db.projects.get(id))! as Record<string, unknown>;
+    const { tracker: _t, trackers: _ts, timeline: _tl, legacyEdits: _le, finishedAt: _fa, ...v1 } = await row(ids[0]!);
+    void [_t, _ts, _tl, _le, _fa];
+    await db.projects.put({ ...v1, schemaVersion: 1, analysisKey: 'x', corrections: [] } as never);
+    const r2 = await row(ids[1]!);
+    await db.projects.put({ ...r2, schemaVersion: 2, trackers: { 'beatthis-small0': { analysisKey: null, corrections: [] }, dsp: { analysisKey: null, corrections: [] } } } as never);
+    await asV3(db, ids[2]!, 'dsp');
+    const listed = await store.list();
+    expect(listed).toHaveLength(4);
+    expect(listed.every((p) => p.schemaVersion === PROJECT_SCHEMA_VERSION && p.timeline === null && p.finishedAt === null)).toBe(true);
+    expect(listed.filter((p) => p.legacyEdits !== null).map((p) => p.id)).toEqual([ids[2]]);
+  });
+});
+
 describe('analysis and peaks rows', () => {
   beforeEach(() => vi.spyOn(console, 'warn').mockImplementation(() => undefined));
 
