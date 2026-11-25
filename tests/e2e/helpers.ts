@@ -2,6 +2,9 @@
 import { expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
+export type SpanLike<T> = { start: number; end: number; startBeat: number; endBeat: number } & T;
+export type SectionLike = SpanLike<{ label: string; confidence: number; cluster: number }>;
+
 export interface MtsHooks {
   __mtsTest?: {
     getCell(c: number, r: number): { block?: { type: string; instrument?: string } } | null;
@@ -30,6 +33,14 @@ export interface MtsHooks {
     getBackend(): 'webgpu' | 'wasm' | null;
     getFallbackReason(): string | null;
     getElapsedMs(): number | null;
+    getSongKey(): { tonic: number; mode: 'major' | 'minor'; name: string } | null;
+    getKeys(): SpanLike<{ tonic: number; mode: 'major' | 'minor'; confidence: number }>[];
+    getChords(): SpanLike<{ root: number | null; quality: 'maj' | 'min' | 'none'; confidence: number }>[];
+    getSections(): SectionLike[];
+    getLevelFixes(): SpanLike<{ factor: 2 | 0.5 }>[];
+    getSectionEdits(): ({ kind: string } & Record<string, unknown>)[];
+    getKeyOverride(): { tonic: number; mode: 'major' | 'minor' } | null;
+    moveBoundary(i: number, toSec: number): void;
   };
   __mtsView?: { cellToClient(c: number, r: number): { x: number; y: number }; getViewport(): { cellSize: number; scrollCol: number } };
 }
@@ -121,6 +132,14 @@ export const ana = {
   backend: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getBackend()),
   fallbackReason: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getFallbackReason()),
   elapsedMs: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getElapsedMs()),
+  songKey: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getSongKey()),
+  keys: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getKeys()),
+  chords: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getChords()),
+  sections: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getSections()),
+  levelFixes: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getLevelFixes()),
+  sectionEdits: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getSectionEdits()),
+  keyOverride: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getKeyOverride()),
+  moveBoundary: (page: Page, i: number, toSec: number) => page.evaluate(([b, t]) => (globalThis as unknown as MtsHooks).__mtsAnalysis!.moveBoundary(b!, t!), [i, toSec] as const),
   /** Waits until the analysis is done (the import and the DSP run in the page). */
   async waitDone(page: Page) {
     await page.waitForFunction(() => (globalThis as unknown as MtsHooks).__mtsAnalysis?.getAnalysisState() === 'done', undefined, { timeout: 90_000 });

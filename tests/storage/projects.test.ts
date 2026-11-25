@@ -352,6 +352,58 @@ describe('schema v1 rows (cycle 4 projects)', () => {
   });
 });
 
+describe('schema v2 rows (cycle 5 projects)', () => {
+  beforeEach(() => vi.spyOn(console, 'warn').mockImplementation(() => undefined));
+
+  /** Rewrites a stored project as a cycle 5 (schema v2) record: trackers without keyOverride or sectionEdits. */
+  async function asV2(db: MtsDb, id: string, tracker: 'beatthis-small0' | 'dsp', corrections: unknown[]): Promise<void> {
+    const row = (await db.projects.get(id))!;
+    const v2 = (c: unknown[]) => ({ analysisKey: 'v2-key', corrections: c });
+    await db.projects.put({ ...row, schemaVersion: 2, tracker, trackers: { 'beatthis-small0': v2(tracker === 'dsp' ? [] : corrections), dsp: v2(tracker === 'dsp' ? corrections : []) } });
+  }
+
+  it('opens a v2 row as v3 with its corrections and tracker, and rewrites it as v3 on save', async () => {
+    const { store, db } = setup();
+    const a = (await store.importFile(song('a.mp3', 'a'))).project;
+    const corrections = [{ kind: 'double' }, { kind: 'nudge', ms: 10 }];
+    await asV2(db, a.id, 'beatthis-small0', corrections);
+
+    const opened = (await store.open(a.id))!;
+    expect(opened.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(opened.tracker).toBe('beatthis-small0');
+    expect(opened.trackers['beatthis-small0']).toEqual({ analysisKey: null, corrections, keyOverride: null, sectionEdits: [] });
+    expect(opened.trackers.dsp.corrections).toEqual([]);
+
+    await store.save(opened);
+    const raw = (await db.projects.get(a.id))! as Record<string, unknown>;
+    expect(raw.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect((raw.trackers as Record<string, Record<string, unknown>>)['beatthis-small0']).toEqual({ analysisKey: null, corrections, keyOverride: null, sectionEdits: [] });
+  });
+
+  it('keeps the DSP tracker and its corrections', async () => {
+    const { store, db } = setup();
+    const a = (await store.importFile(song('a.mp3', 'a'))).project;
+    await asV2(db, a.id, 'dsp', [{ kind: 'setDownbeat', beat: 3 }]);
+    const opened = (await store.open(a.id))!;
+    expect(opened.tracker).toBe('dsp');
+    expect(opened.trackers.dsp.corrections).toEqual([{ kind: 'setDownbeat', beat: 3 }]);
+    expect((await store.list()).map((p) => p.schemaVersion)).toEqual([PROJECT_SCHEMA_VERSION]);
+  });
+
+  it('round-trips v3 edits: section edits, key pick and range corrections', async () => {
+    const { store } = setup();
+    const a = (await store.importFile(song('a.mp3', 'a'))).project;
+    const state = {
+      analysisKey: null,
+      corrections: [{ kind: 'range' as const, start: 8, end: 16, op: 'double' as const }],
+      keyOverride: { tonic: 7 as const, mode: 'major' as const },
+      sectionEdits: [{ kind: 'move' as const, from: 16, to: 20 }, { kind: 'rename' as const, at: 3, label: 'intro' as const }],
+    };
+    await store.save({ ...a, trackers: { ...a.trackers, dsp: state } });
+    expect((await store.open(a.id))!.trackers.dsp).toEqual(state);
+  });
+});
+
 describe('analysis and peaks rows', () => {
   beforeEach(() => vi.spyOn(console, 'warn').mockImplementation(() => undefined));
 

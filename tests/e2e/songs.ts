@@ -33,6 +33,12 @@ export function makeSong({ bpm, beatsPerBar, seconds, offset = 0.25 }: SongSpec)
       for (let i = 0; i < barLen; i++) x[start + i]! += 0.12 * (Math.sin((2 * Math.PI * root * i) / RATE) + Math.sin((2 * Math.PI * root * 1.5 * i) / RATE));
     }
   }
+  return wav(x);
+}
+
+/** WAV bytes of 16-bit mono PCM at RATE. */
+function wav(x: Float32Array): Buffer {
+  const n = x.length;
   const data = Buffer.alloc(n * 2);
   for (let i = 0; i < n; i++) data.writeInt16LE(Math.round(Math.max(-1, Math.min(1, x[i]!)) * 32767), i * 2);
   const head = Buffer.alloc(44);
@@ -50,6 +56,74 @@ export function makeSong({ bpm, beatsPerBar, seconds, offset = 0.25 }: SongSpec)
   head.writeUInt32LE(data.length, 40);
   return Buffer.concat([head, data]);
 }
+
+/** The A B A B song (M2c): 120 BPM, 4/4, 8 bars per section, first beat at ABAB_OFFSET seconds. Known key G major. */
+export const ABAB = { bpm: 120, beatsPerBar: 4, barsPerSection: 8, sections: 4, offset: 0.25, key: 'G major' } as const;
+const CHORDS_A = ['G', 'D', 'Em', 'C', 'G', 'D', 'Em', 'C'];
+const CHORDS_B = ['Am', 'D', 'G', 'G', 'Am', 'D', 'G', 'G'];
+/** Triads as MIDI notes, around G3. */
+const TRIADS: Record<string, number[]> = { G: [55, 59, 62], D: [50, 54, 57], Em: [52, 55, 59], C: [48, 52, 55], Am: [57, 60, 64] };
+const midiHz = (m: number) => 440 * 2 ** ((m - 69) / 12);
+
+/** The chord name ("G", "Em") sounding in bar `bar` (from 0) of the A B A B song. */
+export function ababChord(bar: number): string {
+  const section = Math.floor(bar / ABAB.barsPerSection);
+  return (section % 2 === 0 ? CHORDS_A : CHORDS_B)[bar % ABAB.barsPerSection]!;
+}
+
+/**
+ * About 64 s: A B A B, 8 bars each. A = G D Em C (twice), soft triads; B = Am D G G (twice), louder, with the triad an
+ * octave up as well and noise hits on the off-beats. A kick on every beat. Deterministic noise.
+ */
+export function makeAbab(): Buffer {
+  const beatSec = 60 / ABAB.bpm;
+  const barSec = beatSec * ABAB.beatsPerBar;
+  const bars = ABAB.barsPerSection * ABAB.sections;
+  const seconds = ABAB.offset + bars * barSec + 0.5;
+  const n = Math.round(RATE * seconds);
+  const x = new Float32Array(n);
+  let seed = 12345;
+  const noise = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff - 0.5;
+  };
+  for (let bar = 0; bar < bars; bar++) {
+    const isB = Math.floor(bar / ABAB.barsPerSection) % 2 === 1;
+    const start = Math.round((ABAB.offset + bar * barSec) * RATE);
+    const len = Math.round(barSec * RATE);
+    const notes = TRIADS[ababChord(bar)]!;
+    const hz = [...notes.map(midiHz), ...(isB ? notes.map((m) => midiHz(m + 12)) : [])];
+    const amp = isB ? 0.07 : 0.06;
+    for (let i = 0; i < len && start + i < n; i++) {
+      const env = Math.min(1, i / 200, (len - i) / 200);
+      let v = 0;
+      for (const f of hz) {
+        const w = (2 * Math.PI * f * i) / RATE;
+        v += Math.sin(w) + 0.4 * Math.sin(2 * w) + 0.2 * Math.sin(3 * w);
+      }
+      x[start + i]! += amp * env * v;
+    }
+    for (let k = 0; k < ABAB.beatsPerBar; k++) {
+      // Kick: a falling sine with a click.
+      const b = start + Math.round(k * beatSec * RATE);
+      const kickLen = Math.round(0.12 * RATE);
+      let phase = 0;
+      for (let i = 0; i < kickLen && b + i < n; i++) {
+        const f = 50 + 100 * Math.exp(-i / (0.02 * RATE));
+        phase += (2 * Math.PI * f) / RATE;
+        x[b + i]! += 0.6 * Math.exp(-i / (0.04 * RATE)) * Math.sin(phase);
+      }
+      if (isB) {
+        const off = b + Math.round((beatSec / 2) * RATE);
+        const hitLen = Math.round(0.05 * RATE);
+        for (let i = 0; i < hitLen && off + i < n; i++) x[off + i]! += 0.3 * Math.exp(-i / (0.01 * RATE)) * noise();
+      }
+    }
+  }
+  return wav(x);
+}
+
+export const songAbab = (): UploadFile => ({ name: 'abab.wav', mimeType: 'audio/wav', buffer: makeAbab() });
 
 /** 20 s at 120 BPM in 4/4. */
 export const song44 = (): UploadFile => ({ name: 'song44.wav', mimeType: 'audio/wav', buffer: makeSong({ bpm: 120, beatsPerBar: 4, seconds: 20 }) });
