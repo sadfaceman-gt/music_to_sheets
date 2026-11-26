@@ -40,6 +40,12 @@ import { barCount, formatBpm, formatClock, formatMeter } from '../analysis/forma
 import { readyToAutoApply, startsNewSequence, TAP_IDLE_SECONDS } from '../analysis/taps.ts';
 import { fallbackNotice, stageLabel, TRACKER_BUTTON_LABELS, trackerInfoText } from '../analysis/trackerInfo.ts';
 import { ProgressBar } from '../ui/ProgressBar.tsx';
+import type { GameProfile } from '../core/profile/schema.ts';
+import { COLUMNS_PER_BEAT, DEFAULT_COLUMNS_PER_BEAT } from '../core/plan/types.ts';
+import type { ColumnsPerBeat } from '../core/plan/types.ts';
+import { planLimits, worldBpm } from '../core/plan/measure.ts';
+import { worldBpmText } from '../plan/planText.ts';
+import { savesSettled, trackSave } from './pendingSaves.ts';
 
 type RunState = 'idle' | 'running' | 'done' | 'cancelled' | 'error';
 
@@ -54,6 +60,10 @@ interface Props {
   onAnalysed: (id: string, analysed: boolean) => void;
   /** Reports whether Finish analysis passed and nothing changed since (project.finishedAt), for the stepper. */
   onFinished: (id: string, finished: boolean) => void;
+  /** Reports whether Finish analysis has passed at least once (project.finishedOnce): the Plan step opens. */
+  onPlanOpen: (id: string, open: boolean) => void;
+  /** The Game Profile (the world BPM limits next to Column clicks). */
+  profile: GameProfile;
 }
 
 const ZOOM_STEP = 2;
@@ -77,7 +87,7 @@ function isTyping(target: EventTarget | null): boolean {
   return el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable;
 }
 
-export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinished }: Props) {
+export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinished, onPlanOpen, profile }: Props) {
   const [project, setProject] = useState<Project | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [peaks, setPeaks] = useState<WaveformPeaks | null>(null);
@@ -94,7 +104,6 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
   const [confirmRerun, setConfirmRerun] = useState(false);
   const [clicksOn, setClicksOn] = useState(true);
   const [colClicks, setColClicks] = useState(false);
-  const [colsPerBeat, setColsPerBeat] = useState(4);
   const [clickVol, setClickVol] = useState(0.7); // facts-ok: default volume
   const [songVol, setSongVol] = useState(1);
   const [fallbackReason, setFallbackReason] = useState<string | null>(null);
@@ -113,6 +122,9 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
   const hoverRef = useRef<number | null>(null);
 
   const durationSec = analysis?.durationSec ?? project?.source.durationSec ?? 0;
+  /** The user's grid (T32), shared with the Plan step and saved in the project. */
+  const colsPerBeat: ColumnsPerBeat = project?.columnsPerBeat ?? DEFAULT_COLUMNS_PER_BEAT;
+  const limits = useMemo(() => planLimits(profile), [profile]);
   const grid: BeatGrid | null = useMemo(() => (analysis ? applyCorrections(analysis.grid, cs.corrections, analysis.durationSec) : null), [analysis, cs.corrections]);
   const snapGrid = useMemo(() => (grid ? snapGridFrom(grid, durationSec) : null), [grid, durationSec]);
   const timeline = cs.timeline;
@@ -340,6 +352,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
     let cancelled = false;
     void (async () => {
       try {
+        await savesSettled();
         const p = await store.open(projectId);
         if (cancelled) return;
         if (!p) {
@@ -353,6 +366,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
         if (cancelled) return;
         onAnalysed(p.id, activeTracker(p).analysisKey !== null);
         onFinished(p.id, p.finishedAt !== null);
+        onPlanOpen(p.id, p.finishedOnce);
         await load(p, p.tracker, false, false);
       } catch (e) {
         if (cancelled) return;
@@ -365,11 +379,11 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
       job.current?.cancel();
       job.current = null;
     };
-  }, [store, projectId, load, onAnalysed, onFinished]);
+  }, [store, projectId, load, onAnalysed, onFinished, onPlanOpen]);
 
   // Leaving the screen stops playback and writes pending corrections.
   useEffect(() => {
-    const flush = () => void autosave.current?.flush();
+    const flush = () => trackSave(autosave.current?.flush());
     window.addEventListener('pagehide', flush);
     const t = taps.current;
     return () => {
@@ -639,6 +653,17 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
     live.current.project = updated;
     save(updated);
     onFinished(p.id, true);
+    onPlanOpen(p.id, true);
+  };
+  /** Column clicks' grid is the project's columns per beat (shared with the Plan step): saved, not an undo step here. */
+  const chooseColumnsPerBeat = (n: ColumnsPerBeat) => {
+    getPlayer().setSubdivisions(colClicks ? n : 1);
+    const p = live.current.project;
+    if (!p) return;
+    const updated: Project = { ...p, columnsPerBeat: n };
+    setProject(updated);
+    live.current.project = updated;
+    save(updated);
   };
   const goToProblem = (p: Problem) => {
     const { time, blockId } = problemPlace(p);
@@ -877,19 +902,23 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
                 data-testid="columns-per-beat"
                 className="rounded bg-slate-800 px-1 py-0.5"
                 value={colsPerBeat}
-                onChange={(e) => {
-                  const n = Number(e.target.value);
-                  setColsPerBeat(n);
-                  getPlayer().setSubdivisions(colClicks ? n : 1);
-                }}
+                onChange={(e) => chooseColumnsPerBeat(Number(e.target.value) as ColumnsPerBeat)}
               >
-                {[2, 3, 4].map((n) => (
+                {COLUMNS_PER_BEAT.map((n) => (
                   <option key={n} value={n}>
                     {n}
                   </option>
                 ))}
               </select>
             </label>
+            {tempo !== null && (
+              <span
+                data-testid="analysis-world-bpm"
+                className={`rounded px-2 py-0.5 text-sm ${worldBpm(tempo, colsPerBeat, limits).inRange ? 'bg-slate-800' : 'bg-amber-900 text-amber-100'}`}
+              >
+                {worldBpmText(worldBpm(tempo, colsPerBeat, limits), limits)}
+              </span>
+            )}
             <label className="flex items-center gap-1 text-sm">
               Click volume
               <input

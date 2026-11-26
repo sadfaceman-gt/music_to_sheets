@@ -2,6 +2,8 @@
 import { expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import type { Timeline } from '../../src/core/timeline/types.ts';
+import type { Plan } from '../../src/core/plan/types.ts';
+import type { MtsPlanHook } from '../../src/plan/testHook.d.ts';
 
 export type SpanLike<T> = { start: number; end: number; startBeat: number; endBeat: number } & T;
 export type SectionLike = SpanLike<{ label: string; confidence: number; cluster: number }>;
@@ -46,6 +48,7 @@ export interface MtsHooks {
     timeToX(sec: number): number;
     xToTime(px: number): number;
   };
+  __mtsPlan?: MtsPlanHook;
   __mtsView?: { cellToClient(c: number, r: number): { x: number; y: number }; getViewport(): { cellSize: number; scrollCol: number } };
 }
 
@@ -154,5 +157,30 @@ export const ana = {
   /** Waits until the analysis is done (the import and the DSP run in the page). */
   async waitDone(page: Page) {
     await page.waitForFunction(() => (globalThis as unknown as MtsHooks).__mtsAnalysis?.getAnalysisState() === 'done', undefined, { timeout: 90_000 });
+  },
+};
+
+/** Reads of the Plan step's test hook (each evaluate body must be self-contained). */
+export const plan = {
+  get: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsPlan!.getPlan()),
+  columnsPerBeat: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsPlan!.getColumnsPerBeat()),
+  measure: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsPlan!.getMeasure()),
+  offers: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsPlan!.getOffers()),
+  fits: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsPlan!.getFits()),
+  scope: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsPlan!.getScope()),
+  playback: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsPlan!.getPlayback()),
+  undoDepth: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsPlan!.getUndoDepth()),
+  set: (page: Page, p: Plan) => page.evaluate((x) => (globalThis as unknown as MtsHooks).__mtsPlan!.setPlan(x), p),
+  /** Waits until the Plan step has loaded its project. */
+  async waitReady(page: Page) {
+    await page.getByTestId('plan-screen').waitFor();
+    await page.waitForFunction(() => {
+      const h = (globalThis as unknown as MtsHooks).__mtsPlan;
+      try {
+        return h !== undefined && h.getMeasure() !== undefined && h.getMeasure() !== null;
+      } catch {
+        return false;
+      }
+    });
   },
 };

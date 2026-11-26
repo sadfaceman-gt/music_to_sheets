@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 
-/** The three screens, addressed by the URL hash so a reload keeps the screen. */
-export type Route = { screen: 'projects' } | { screen: 'analysis'; id: string } | { screen: 'editor' };
+/** The screens, addressed by the URL hash so a reload keeps the screen. */
+export type Route = { screen: 'projects' } | { screen: 'analysis'; id: string } | { screen: 'plan'; id: string } | { screen: 'editor' };
 
 export function parseHash(hash: string): Route {
   const h = hash.replace(/^#/, '');
   if (h === '/editor') return { screen: 'editor' };
-  const m = /^\/project\/(.+)$/.exec(h);
+  const plan = /^\/project\/([^/]+)\/plan$/.exec(h);
+  const m = plan ?? /^\/project\/(.+)$/.exec(h);
   if (m?.[1]) {
     try {
-      return { screen: 'analysis', id: decodeURIComponent(m[1]) };
+      return { screen: plan ? 'plan' : 'analysis', id: decodeURIComponent(m[1]) };
     } catch {
       return { screen: 'projects' };
     }
@@ -20,7 +21,13 @@ export function parseHash(hash: string): Route {
 export function routeHash(route: Route): string {
   if (route.screen === 'editor') return '#/editor';
   if (route.screen === 'analysis') return `#/project/${encodeURIComponent(route.id)}`;
+  if (route.screen === 'plan') return `#/project/${encodeURIComponent(route.id)}/plan`;
   return '#/projects';
+}
+
+/** The project a route is about, or null. */
+export function routeProjectId(route: Route): string | null {
+  return route.screen === 'analysis' || route.screen === 'plan' ? route.id : null;
 }
 
 /** Current route from location.hash, and a navigate function that sets it. */
