@@ -6,7 +6,7 @@
  * Split mode a click splits a block. A drag is previewed here and committed to the parent once, on release.
  */
 import { memo, useMemo, useRef, useState } from 'react';
-import { createBlock, dragSharedEdge, moveBlocks, resizeBlock, splitBlock, touchingRight } from '../core/timeline/ops.ts';
+import { createBlock, dragSharedEdge, findBlock, moveBlocks, resizeBlock, splitBlock, touchingRight } from '../core/timeline/ops.ts';
 import type { SnapOptions } from '../core/timeline/ops.ts';
 import { ROWS } from '../core/timeline/types.ts';
 import type { Block, Problem, RowKind, SnapGrid, Timeline } from '../core/timeline/types.ts';
@@ -49,9 +49,11 @@ interface Props {
   onCommit: (after: Timeline, selection: number[], before: Timeline) => void;
   /** The time under the pointer while it is over the rows, else null (Paste lands there). */
   hoverRef: { current: number | null };
+  /** A plain click (fill false) or a double-click (fill true) on a chord block with the Select tool (T40). */
+  onChordClick?: (block: Block, fill: boolean) => void;
 }
 
-export function TimelineView({ timeline, selection, view, width, durationSec, snap, mode, playhead, problems, onSelect, onCommit, hoverRef }: Props) {
+export function TimelineView({ timeline, selection, view, width, durationSec, snap, mode, playhead, problems, onSelect, onCommit, hoverRef, onChordClick }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const gesture = useRef<Gesture | null>(null);
   const [preview, setPreview] = useState<Timeline | null>(null);
@@ -185,7 +187,11 @@ export function TimelineView({ timeline, selection, view, width, durationSec, sn
         if (g.moved) {
           const r = moveBlocks(g.start, g.sel, xToTime(view, x) - g.t0, snapOpts);
           if (r.timeline !== g.start) onCommit(r.timeline, r.selection, g.start);
-        } else onSelect([g.id]);
+        } else {
+          onSelect([g.id]);
+          const b = findBlock(g.start, g.id);
+          if (b?.row === 'chord') onChordClick?.(b, false);
+        }
         break;
       case 'resize':
         if (g.moved) {
@@ -237,6 +243,15 @@ export function TimelineView({ timeline, selection, view, width, durationSec, sn
         if (!gesture.current) hoverRef.current = null;
       }}
       onContextMenu={(e) => e.preventDefault()}
+      onDoubleClick={(e) => {
+        if (mode !== 'select' || e.button !== 0 || e.ctrlKey || e.metaKey) return;
+        const el = wrapRef.current!;
+        const r = el.getBoundingClientRect();
+        const x = e.clientX - r.left - el.clientLeft;
+        const y = e.clientY - r.top - el.clientTop;
+        const h = hit(x, rowAt(y));
+        if (h && h.edge === null && h.block.row === 'chord') onChordClick?.(h.block, true);
+      }}
     >
       {ROWS.map((row, i) => (
         <Row

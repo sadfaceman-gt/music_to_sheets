@@ -1,13 +1,15 @@
 /**
  * The naming panel under the timeline tools (M2c cycle 7, Design 5.5), for a selection in one row: the section label
- * buttons, the Keys dropdown, or the chord dropdowns (choices chordProblem rejects are disabled) and Write chord name.
+ * buttons, the Keys dropdown, or the chord dropdowns (choices chordProblem rejects are disabled), and the chord name box
+ * (Write chord name, T40), always shown: a click on a chord block focuses and clears it, a double-click fills it.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SECTION_LABELS } from '../core/analysis/types.ts';
 import { chordProblem, formatChord, formatKey, keyChoices, normaliseAlterations, parseChord, sameKey, sameSpelling, spellingName } from '../core/timeline/chords.ts';
 import { findBlock } from '../core/timeline/ops.ts';
 import { CHORD_ALTERATIONS, CHORD_EXTENSIONS, CHORD_QUALITIES, SPELLINGS } from '../core/timeline/types.ts';
 import type { Block, BlockName, Chord, ChordAlteration, ChordExtension, ChordQualityName, Selection, Timeline } from '../core/timeline/types.ts';
+import { CHORD_BOX_ATTR } from './chordBoxKeys.ts';
 import { selectionRow } from './timelineText.ts';
 
 type NamedChord = Extract<Chord, { kind: 'chord' }>;
@@ -26,11 +28,17 @@ interface Props {
   timeline: Timeline;
   selection: Selection;
   onName: (name: BlockName) => void;
-  writeMode: boolean;
-  onWriteMode: (on: boolean) => void;
+  /** A request from the timeline to focus the chord box with this text (n counts requests; select selects the text). */
+  boxRequest: ChordBoxRequest | null;
 }
 
-export function NamingPanel({ timeline, selection, onName, writeMode, onWriteMode }: Props) {
+export interface ChordBoxRequest {
+  n: number;
+  text: string;
+  select: boolean;
+}
+
+export function NamingPanel({ timeline, selection, onName, boxRequest }: Props) {
   const row = selectionRow(timeline, selection);
   const first: Block | undefined = selection.map((id) => findBlock(timeline, id)).find((b): b is Block => !!b && b.row === row);
 
@@ -84,12 +92,8 @@ export function NamingPanel({ timeline, selection, onName, writeMode, onWriteMod
           </label>
         )}
         {row === 'chord' && <ChordDropdowns current={first?.row === 'chord' ? first.name : null} onChord={(c) => onName({ row: 'chord', name: c })} />}
-        <label className="ml-auto flex items-center gap-1" title="Type chord names; every shortcut is off while this is on">
-          <input type="checkbox" role="switch" data-testid="write-chord-toggle" checked={writeMode} onChange={(e) => onWriteMode(e.target.checked)} />
-          Write chord name
-        </label>
       </div>
-      {writeMode && <WriteChord enabled={row === 'chord'} onChord={(c) => onName({ row: 'chord', name: c })} />}
+      <WriteChord enabled={row === 'chord'} request={boxRequest} onChord={(c) => onName({ row: 'chord', name: c })} />
     </section>
   );
 }
@@ -182,36 +186,74 @@ function ChordDropdowns({ current, onChord }: { current: Chord | null; onChord: 
   );
 }
 
-function WriteChord({ enabled, onChord }: { enabled: boolean; onChord: (c: Chord) => void }) {
+function WriteChord({ enabled, request, onChord }: { enabled: boolean; request: ChordBoxRequest | null; onChord: (c: Chord) => void }) {
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const [seen, setSeen] = useState<ChordBoxRequest | null>(request);
+  if (request !== seen) {
+    // A new request from the timeline: take its text while rendering (React's "adjust state on a prop change").
+    setSeen(request);
+    if (request) {
+      setText(request.text);
+      setError(null);
+    }
+  }
+
+  // Focus after the render that selected the clicked block, so the box is enabled by then.
+  const mounted = useRef(false);
+  useEffect(() => {
+    const el = input.current;
+    const first = !mounted.current;
+    mounted.current = true;
+    if (first || !request || !el) return;
+    el.focus();
+    if (request.select) el.select();
+  }, [request]);
+
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <input
-        type="text"
-        data-testid="chord-input"
-        className="w-48 rounded bg-slate-800 px-2 py-0.5 font-mono"
-        placeholder="e.g. D/F#, Am7, Bbmaj7"
-        value={text}
-        autoFocus
-        aria-label="Chord name"
-        onChange={(e) => {
-          setText(e.target.value);
-          setError(null);
-        }}
-        onKeyDown={(e) => {
-          if (e.key !== 'Enter') return;
-          e.preventDefault();
-          if (!enabled) {
-            setError('Select chord blocks first');
-            return;
-          }
-          const r = parseChord(text);
-          if (r.ok) onChord(r.chord);
-          else setError(r.reason);
-        }}
-      />
-      <span className="text-slate-500">Enter applies it to the selected chord blocks.</span>
+      <label className="flex items-center gap-1">
+        Write chord name
+        <input
+          type="text"
+          ref={input}
+          data-testid="chord-input"
+          {...{ [CHORD_BOX_ATTR]: '' }}
+          className="w-48 rounded bg-slate-800 px-2 py-0.5 font-mono disabled:opacity-40"
+          placeholder="e.g. D/F#, Am7, Bbmaj7"
+          value={text}
+          disabled={!enabled}
+          autoComplete="off"
+          spellCheck={false}
+          onChange={(e) => {
+            setText(e.target.value);
+            setError(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              // Leaves the box; a second Escape (on the page) clears the selection.
+              e.preventDefault();
+              e.stopPropagation();
+              e.currentTarget.blur();
+              return;
+            }
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            if (!enabled) {
+              setError('Select chord blocks first');
+              return;
+            }
+            const r = parseChord(text);
+            if (r.ok) {
+              onChord(r.chord);
+              setText('');
+              setError(null);
+            } else setError(r.reason);
+          }}
+        />
+      </label>
+      <span className="text-slate-500">Click a chord block, type its name and press Enter. Space plays, Delete deletes blocks.</span>
       {error && (
         <span data-testid="chord-error" role="alert" className="text-rose-300">
           {error}
