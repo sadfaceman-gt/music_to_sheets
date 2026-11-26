@@ -647,7 +647,7 @@ test('re-run counts the corrections and the timeline, then refills the timeline 
   expect(await ana.timeline(page)).toEqual(refilled);
 });
 
-test('a cycle 6 project (schema v3) opens as v4: its key pick is one key block, its section edits are applied', async ({ page }) => {
+test('a cycle 6 project (schema v3) opens as v5: its key pick is one key block, its section edits are applied', async ({ page }) => {
   test.setTimeout(120_000);
   await page.addInitScript(() => localStorage.setItem('mts.firstRunDone', 'yes'));
   await page.goto('./');
@@ -716,7 +716,7 @@ test('a cycle 6 project (schema v3) opens as v4: its key pick is one key block, 
         };
       }),
   );
-  expect(stored.schemaVersion).toBe(4);
+  expect(stored.schemaVersion).toBe(5);
   expect(stored.legacyEdits).toBeNull();
   expect(stored.timeline).toEqual(tl);
 });
