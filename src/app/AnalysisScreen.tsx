@@ -14,7 +14,7 @@ import { keyName } from '../core/analysis/music.ts';
 import { snapGridFrom } from '../core/timeline/snap.ts';
 import { seedTimeline } from '../core/timeline/seed.ts';
 import { checkTimeline } from '../core/timeline/validate.ts';
-import { copyBlocks, cutBlocks, deleteBlocks, findBlock, markReviewed, mergeBlocks, nameBlocks, pasteBlocks, stepBlocks } from '../core/timeline/ops.ts';
+import { alignEdges, copyBlocks, cutBlocks, deleteBlocks, findBlock, markReviewed, mergeBlocks, nameBlocks, pasteBlocks, stepBlocks } from '../core/timeline/ops.ts';
 import type { SnapOptions } from '../core/timeline/ops.ts';
 import type { BlockName, Clipboard, Problem, Timeline } from '../core/timeline/types.ts';
 import { startAnalysis } from '../workers/analysisClient.ts';
@@ -608,7 +608,10 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
 
   const finishAnalysis = () => {
     if (!timeline || !snapGrid) return;
-    const c = checkTimeline(timeline, snapGrid);
+    // Edges a little off their beats (drift from rigid moves and pastes, T41) are moved onto them first, as one undo step.
+    const aligned = alignEdges(timeline, snapGrid);
+    if (aligned !== timeline) commit(aligned, sel);
+    const c = checkTimeline(aligned, snapGrid);
     if (c.problems.length > 0) setFinishView('report');
     else if (c.unreviewed > 0) setFinishView('warning');
     else markFinished();

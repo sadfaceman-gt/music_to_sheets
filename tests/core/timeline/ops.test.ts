@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  alignEdges,
   copyBlocks,
   createBlock,
   cutBlocks,
@@ -18,6 +19,8 @@ import {
 } from '../../../src/core/timeline/ops.ts';
 import { emptyTimeline } from '../../../src/core/timeline/types.ts';
 import { AM, BAR, BEAT, C, cb, kb, sb, spans, tl } from './helpers.ts';
+import { checkTimeline } from '../../../src/core/timeline/validate.ts';
+import type { SnapGrid } from '../../../src/core/timeline/types.ts';
 
 describe('touchingRight', () => {
   it('finds the block starting where this one ends, in the same row only', () => {
@@ -343,5 +346,58 @@ describe('markReviewed and nameBlocks', () => {
     expect(findBlock(r, 3)).toBe(t.section[0]);
     expect(nameBlocks(t, [3], { row: 'key', name: { tonic: { letter: 'D', accidental: '' }, mode: 'minor' } })).toBe(t);
     expect(findBlock(nameBlocks(t, [3], { row: 'section', name: 'chorus' }), 3)).toMatchObject({ name: 'chorus', reviewed: true });
+  });
+});
+
+/**
+ * T41: beats that are not evenly spaced (a real song drifts by a few ms per beat). Rigid moves and pastes keep their
+ * offsets in seconds, so before the fix every edge but the snapped one landed a little off its beat and Finish analysis
+ * flagged "Chord edge off a beat" on blocks that looked right.
+ */
+describe('edges stay on beats with uneven beats (T41)', () => {
+  // Beats about 0.5 s apart with the tracker's ±20 ms jitter (Beat This! beats are 20 ms quantised); bars every 4 beats.
+  const jitter = [0, 0.02, -0.02, 0, 0.02, 0, -0.02, 0.02];
+  const beats: number[] = [];
+  for (let i = 1; i * 0.5 < 30 - 0.1; i++) beats.push(Math.round((i * 0.5 + jitter[i % jitter.length]!) * 1000) / 1000);
+  const ug: SnapGrid = { beats, bars: beats.filter((_, i) => i % 4 === 3), durationSec: 30 };
+  const opts = { grid: ug, mode: 'beat' as const };
+  const b = (i: number) => beats[i - 1]!; // beat i (1-based), about i * 0.5 s
+  const chorus = () => tl([cb(1, b(4), b(6)), cb(2, b(6), b(9)), cb(3, b(9), b(12)), sb(4, b(4), b(12))]);
+
+  it('a pasted chorus lands on beats, so Finish analysis finds no off-beat edges', () => {
+    const t = chorus();
+    const clip = copyBlocks(t, [1, 2, 3, 4]);
+    const out = pasteBlocks(t, clip, 11, opts).timeline;
+    const pasted = out.chord.filter((b) => b.start >= 10.9);
+    expect(pasted.length).toBe(3);
+    for (const b of out.chord) for (const e of [b.start, b.end]) expect(beats.concat([0, 30]).some((x) => Math.abs(x - e) < 1e-9)).toBe(true);
+    const offGrid = checkTimeline(out, ug).problems.filter((p) => p.kind === 'offGrid' && p.row === 'chord');
+    expect(offGrid).toEqual([]);
+  });
+
+  it('a moved selection lands on beats', () => {
+    const t = chorus();
+    const out = moveBlocks(t, [1, 2, 3], 8.3, opts).timeline;
+    expect(checkTimeline(out, ug).problems.filter((p) => p.kind === 'offGrid' && p.row === 'chord')).toEqual([]);
+  });
+
+  it('arrow steps keep every edge on a beat', () => {
+    let t = tl([cb(1, b(14), b(16)), cb(2, b(16), b(18))]);
+    for (let i = 0; i < 4; i++) t = stepBlocks(t, [1, 2], 1, opts).timeline;
+    expect(checkTimeline(t, ug).problems.filter((p) => p.kind === 'offGrid')).toEqual([]);
+  });
+
+  it('alignEdges moves edges a little off a beat onto it, keeps the rest, and returns the input when nothing moves', () => {
+    const t = tl([cb(1, b(16) + 0.03, b(18) - 0.04, true), cb(2, b(18) - 0.04, b(18) + 0.2), sb(3, 0, 30)]);
+    const out = alignEdges(t, ug);
+    expect(spans(out.chord)).toEqual([[1, b(16), b(18)], [2, b(18), b(18) + 0.2]]);
+    expect(out.chord[0]!.reviewed).toBe(true);
+    expect(out.section).toEqual(t.section);
+    expect(alignEdges(out, ug)).toBe(out);
+  });
+
+  it('alignEdges keeps a row it cannot align without a block vanishing', () => {
+    const t = tl([cb(1, b(16) + 0.01, b(16) + 0.03)]);
+    expect(alignEdges(t, ug)).toBe(t);
   });
 });

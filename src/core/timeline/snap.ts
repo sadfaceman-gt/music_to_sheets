@@ -40,6 +40,28 @@ export function snapTime(t: number, g: SnapGrid, mode: SnapMode): number {
   return Math.abs(t - before) <= Math.abs(after - t) ? before : after;
 }
 
+/**
+ * How far an edge may be from a beat and still count as meant for it (T41), as a fraction of the gap between the two
+ * beats around it. Rigid moves and pastes keep offsets in seconds, and beats are not evenly spaced, so the edges after
+ * the first land a few milliseconds off their beats.
+ */
+export const ALIGN_FRACTION = 0.25;
+
+/**
+ * t moved onto the nearest beat (or the song's start or end) when it is within ALIGN_FRACTION of the beat gap around
+ * it; otherwise t unchanged (T41). Bars are beats too, so an edge meant for a bar lands on it.
+ */
+export function alignTime(t: number, g: SnapGrid): number {
+  const xs = targets(g, 'beat');
+  const i = lowerBound(xs, t);
+  const after = xs[i];
+  const before = xs[i - 1];
+  if (after !== undefined && after === t) return t;
+  if (before === undefined || after === undefined) return t;
+  const near = t - before <= after - t ? before : after;
+  return Math.abs(near - t) <= ALIGN_FRACTION * (after - before) ? near : t;
+}
+
 /** Whether t sits on a target of the mode (within TIME_EPS). */
 export function onGrid(t: number, g: SnapGrid, mode: SnapMode): boolean {
   return Math.abs(snapTime(t, g, mode) - t) <= TIME_EPS;

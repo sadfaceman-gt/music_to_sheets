@@ -1,6 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
+  alignEdges,
   allBlocks,
   copyBlocks,
   createBlock,
@@ -18,6 +19,7 @@ import {
   touchingRight,
 } from '../../../src/core/timeline/ops.ts';
 import type { SnapOptions } from '../../../src/core/timeline/ops.ts';
+import { ALIGN_FRACTION } from '../../../src/core/timeline/snap.ts';
 import { ROWS, TIME_EPS } from '../../../src/core/timeline/types.ts';
 import type { Block, BlockName, Clipboard, RowKind, SnapGrid, Timeline } from '../../../src/core/timeline/types.ts';
 import { AM, C, grid } from './helpers.ts';
@@ -282,7 +284,7 @@ describe('timeline ops (properties)', () => {
     );
   });
 
-  it('move keeps the selection rigid and lands its earliest start on a target or its end on the song end', () => {
+  it('move keeps the selection rigid up to beat alignment (T41) and lands its earliest start on a target or its end on the song end', () => {
     fc.assert(
       fc.property(caseArb, selArb, fc.double({ min: -1, max: 1, noNaN: true }), fc.boolean(), ({ g, tl }, rawSel, f, shift) => {
         const sel = pickSel(tl, rawSel);
@@ -291,25 +293,46 @@ describe('timeline ops (properties)', () => {
         const before = allBlocks(tl).filter((b) => sel.includes(b.id));
         if (before.length === 0 || out === tl) return;
         const after = new Map(allBlocks(out).map((b) => [b.id, b]));
-        const d = after.get(before[0]!.id)!.start - before[0]!.start;
-        for (const b of before) {
-          const a = after.get(b.id)!;
-          expect(a.start - b.start).toBeCloseTo(d, 9);
-          expect(a.end - b.end).toBeCloseTo(d, 9);
-          expect(a.reviewed).toBe(true);
-        }
-        const first = Math.min(...before.map((b) => b.start)) + d;
-        const last = Math.max(...before.map((b) => b.end)) + d;
         const targets = [0, ...(shift ? g.beats : g.bars), g.durationSec];
-        const onTarget = targets.some((x) => Math.abs(x - first) < 1e-9);
-        expect(onTarget || Math.abs(last - g.durationSec) < 1e-9).toBe(true);
+        const beatTargets = [0, ...g.beats, g.durationSec];
+        const onBeat = (t: number) => beatTargets.some((x) => Math.abs(x - t) < 1e-9);
+        const gap = Math.max(...beatTargets.slice(1).map((x, i) => x - beatTargets[i]!));
+        // Some rigid delta d (the earliest start's or, at the song end, the last end's) explains every edge: it moved
+        // by d, or by a little more or less onto a beat (alignTime).
+        const edges = before.flatMap((b) => [
+          [b.start, after.get(b.id)!.start],
+          [b.end, after.get(b.id)!.end],
+        ]) as Array<[number, number]>;
+        const fits = (d: number) =>
+          edges.every(([was, now]) => Math.abs(now - was - d) <= 1e-9 || (onBeat(now) && Math.abs(now - was - d) <= ALIGN_FRACTION * gap + 1e-9));
+        expect(edges.some(([was, now]) => fits(now - was))).toBe(true);
+        for (const b of before) expect(after.get(b.id)!.reviewed).toBe(true);
+        const first = Math.min(...before.map((b) => after.get(b.id)!.start));
+        const last = Math.max(...before.map((b) => after.get(b.id)!.end));
+        expect(targets.some((x) => Math.abs(x - first) < 1e-9) || Math.abs(last - g.durationSec) < 1e-9 || onBeat(first)).toBe(true);
       }),
       { numRuns: 1000 },
     );
   });
-});
 
-describe('timeline ops (performance)', () => {
+  it('alignEdges keeps the invariants, never mutates, and only moves edges onto beats (T41)', () => {
+    fc.assert(
+      fc.property(caseArb, ({ g, tl }) => {
+        const before = structuredClone(tl);
+        const out = alignEdges(tl, g);
+        expect(tl).toEqual(before);
+        checkInvariants(out, g.durationSec);
+        const targets = [0, ...g.beats, g.durationSec];
+        const was = new Map(allBlocks(tl).map((b) => [b.id, b]));
+        for (const b of allBlocks(out)) {
+          const w = was.get(b.id)!;
+          for (const [a, c] of [[w.start, b.start], [w.end, b.end]] as const) if (a !== c) expect(targets.some((x) => x === c)).toBe(true);
+        }
+      }),
+      { numRuns: 1000 },
+    );
+  });
+
   it('every op stays fast on 300 chords plus keys and sections', () => {
     const g = grid(600);
     const t: Timeline = { key: [], chord: [], section: [], nextId: 1 };

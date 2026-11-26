@@ -14,7 +14,7 @@
  *
  * CONTRACT (cycle 7): signatures are fixed; 7-timeline implements the stubs below.
  */
-import { snapTargets, snapTime } from './snap.ts';
+import { alignTime, snapTargets, snapTime } from './snap.ts';
 import { ROWS, TIME_EPS } from './types.ts';
 import type { Block, BlockName, ChordBlock, Clipboard, Edited, KeyBlock, RowKind, SectionBlock, Selection, SnapGrid, SnapMode, Timeline } from './types.ts';
 
@@ -126,8 +126,29 @@ function selectedSet(tl: Timeline, sel: Selection): Set<number> {
   return have;
 }
 
-/** Shifts the selected blocks by d seconds (already checked to stay in the song); they cover what they land on. */
-function shift(tl: Timeline, ids: Set<number>, d: number): Timeline {
+/**
+ * The blocks of one row (sorted, not overlapping) with their edges moved onto nearby beats (alignTime, T41). If that
+ * would leave a block no longer than TIME_EPS, or make two of them overlap, the row is returned unchanged.
+ */
+function alignRow<B extends Block>(blocks: readonly B[], g: SnapGrid): B[] {
+  const out: B[] = [];
+  let prevEnd = -Infinity;
+  for (const b of blocks) {
+    const start = alignTime(b.start, g);
+    const end = alignTime(b.end, g);
+    if (end - start <= TIME_EPS || start < prevEnd - TIME_EPS) return [...blocks];
+    out.push(start === b.start && end === b.end ? b : { ...b, start, end });
+    prevEnd = end;
+  }
+  return out;
+}
+
+/**
+ * Shifts the selected blocks by d seconds (already checked to stay in the song); they cover what they land on. Their
+ * edges are then aligned to the beats they were meant for (alignTime, T41): beats are not evenly spaced, so a shift in
+ * seconds leaves every edge but the snapped one a few milliseconds off its beat.
+ */
+function shift(tl: Timeline, ids: Set<number>, d: number, g: SnapGrid): Timeline {
   const counter: Ids = { next: tl.nextId };
   const rows = rowsOf(tl);
   const out = {} as Rows;
@@ -138,9 +159,25 @@ function shift(tl: Timeline, ids: Set<number>, d: number): Timeline {
       if (ids.has(b.id)) moved.push({ ...b, start: b.start + d, end: b.end + d, reviewed: true });
       else fixed.push(b);
     }
-    out[r] = moved.length > 0 ? cover(fixed, moved, counter) : rows[r];
+    out[r] = moved.length > 0 ? cover(fixed, alignRow(moved, g), counter) : rows[r];
   }
   return build(out, counter.next);
+}
+
+/**
+ * Every edge a little off a beat moved onto it (alignTime, T41), row by row; a row that can't be aligned without a
+ * block vanishing or overlapping is kept. Returns the input itself when nothing moves. Reviewed states are kept.
+ * Finish analysis runs it first, so drift from earlier rigid moves and pastes is fixed silently.
+ */
+export function alignEdges(tl: Timeline, g: SnapGrid): Timeline {
+  const rows = rowsOf(tl);
+  const out = {} as Rows;
+  let changed = false;
+  for (const r of ROWS) {
+    const next = alignRow(rows[r], g);
+    out[r] = next.some((b, i) => b !== rows[r][i]) ? ((changed = true), next) : rows[r];
+  }
+  return changed ? build(out, tl.nextId) : tl;
 }
 
 /** The selection's extent: earliest start, latest end. */
@@ -210,7 +247,7 @@ export function moveBlocks(tl: Timeline, sel: Selection, delta: number, snap: Sn
   }
   const d = best - start;
   if (d === 0) return same;
-  return { timeline: shift(tl, ids, d), selection: [...sel] };
+  return { timeline: shift(tl, ids, d, snap.grid), selection: [...sel] };
 }
 
 /** Moves the selection one snap step (a bar; a beat in 'beat' mode) later (dir 1) or earlier (-1): the arrow keys. */
@@ -230,7 +267,7 @@ export function stepBlocks(tl: Timeline, sel: Selection, dir: 1 | -1, snap: Snap
   if (end + d > dur) d = dur - end;
   if (start + d < 0) d = -start;
   if (d === 0 || Math.sign(d) !== dir) return same;
-  return { timeline: shift(tl, ids, d), selection: [...sel] };
+  return { timeline: shift(tl, ids, d, snap.grid), selection: [...sel] };
 }
 
 /** Drags one edge of a block to `t` (snapped); the block trims what it now covers. */
@@ -373,8 +410,14 @@ export function pasteBlocks(tl: Timeline, clip: Clipboard, at: number, snap: Sna
     const pasted: Block[] = [];
     let prevEnd = -Infinity;
     for (const it of items) {
-      const start = Math.max(base + it.offset - minOffset, prevEnd, 0);
-      const end = Math.min(base + it.offset - minOffset + it.length, dur);
+      // Offsets are in seconds and beats are not evenly spaced: each edge goes to the beat it was meant for (T41).
+      const rawStart = base + it.offset - minOffset;
+      const rawEnd = rawStart + it.length;
+      const aStart = alignTime(rawStart, snap.grid);
+      const aEnd = alignTime(rawEnd, snap.grid);
+      const aligned = aEnd - aStart > TIME_EPS;
+      const start = Math.max(aligned ? aStart : rawStart, prevEnd, 0);
+      const end = Math.min(aligned ? aEnd : rawEnd, dur);
       if (end - start <= TIME_EPS) continue;
       const b = { id: counter.next++, row: r, start, end, reviewed: true, name: clone(it.name) } as Block;
       pasted.push(b);

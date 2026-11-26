@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { onGrid, snapGridFrom, snapTargets, snapTime, stepTime } from '../../../src/core/timeline/snap.ts';
+import { alignTime, onGrid, snapGridFrom, snapTargets, snapTime, stepTime } from '../../../src/core/timeline/snap.ts';
 import { TIME_EPS } from '../../../src/core/timeline/types.ts';
 import { grid } from './helpers.ts';
 
@@ -63,5 +63,17 @@ describe('stepTime', () => {
     expect(stepTime(18, g, 'bar', 3)).toBe(20);
     expect(stepTime(2, g, 'bar', -5)).toBe(0);
     expect(stepTime(4, g, 'bar', 0)).toBe(4);
+  });
+});
+
+describe('alignTime (T41)', () => {
+  it('moves an edge a little off a beat onto it, and leaves others alone', () => {
+    expect(alignTime(4.03, g)).toBe(4); // 0.03 s off, gap 0.5 s
+    expect(alignTime(3.98, g)).toBe(4);
+    expect(alignTime(4.125, g)).toBe(4); // exactly a quarter of the gap
+    expect(alignTime(4.2, g)).toBe(4.2); // too far from either beat
+    expect(alignTime(4, g)).toBe(4);
+    expect(alignTime(0.02, g)).toBe(0); // the song's start and end count
+    expect(alignTime(19.97, g)).toBe(20);
   });
 });

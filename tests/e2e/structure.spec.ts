@@ -457,6 +457,24 @@ test.describe('A B A B song', () => {
     await page.getByTestId('undo-correction').click();
   });
 
+  test('T41: Finish analysis moves edges a few ms off their beats onto them, silently', async () => {
+    const tl = fixture(song);
+    // Every inner chord edge 15 ms late, as rigid moves and pastes used to leave them (beats aren't evenly spaced).
+    const drift = (t: number) => (t > 0 && t < song.dur ? t + 0.015 : t);
+    const drifted: Timeline = { ...tl, chord: tl.chord.map((b) => ({ ...b, start: drift(b.start), end: drift(b.end) })) };
+    await ana.setTimeline(page, drifted);
+    await page.keyboard.press('Escape');
+    await page.getByTestId('finish-analysis').click();
+    await expect(page.getByTestId('finished-badge')).toBeVisible();
+    await expect(page.locator('[data-testid^="finish-problem-"]')).toHaveCount(0);
+    const after = (await ana.timeline(page))!;
+    after.chord.forEach((b, i) => {
+      expect(near(b.start, tl.chord[i]!.start, 1e-3)).toBe(true);
+      expect(near(b.end, tl.chord[i]!.end, 1e-3)).toBe(true);
+    });
+    await reset();
+  });
+
   test('edits survive a reload; undo and redo of a drag (buttons and keys)', async () => {
     await reset(true);
     const { bars } = song;
