@@ -264,6 +264,10 @@ test.describe('A B A B song', () => {
     expect(await ana.selection(page)).toEqual([]);
     await clickAt(CHORD_ROW, bars[20]! + 0.5);
     expect((await ana.selection(page)).length).toBe(1);
+    // The click focused the chord box (T40): the first Escape leaves it, the second clears the selection.
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('chord-input')).not.toBeFocused();
+    expect((await ana.selection(page)).length).toBe(1);
     await page.keyboard.press('Escape');
     expect(await ana.selection(page)).toEqual([]);
   });
@@ -348,30 +352,112 @@ test.describe('A B A B song', () => {
     await page.getByTestId('chord-none').click();
     await expect(page.getByTestId(`block-${c3.id}`)).toHaveText('N.C.');
 
-    // Write chord name: accepts D/F#, refuses /F#d/Dmin2 and changes nothing; shortcuts are off while it is on.
-    await page.getByTestId('write-chord-toggle').check();
+    // Write chord name (always shown, T40): accepts D/F# for both selected blocks, refuses /F#d/Dmin2 and changes nothing.
+    await expect(page.getByTestId('write-chord-toggle')).toHaveCount(0);
     await page.getByTestId('chord-input').fill('D/F#');
     await page.getByTestId('chord-input').press('Enter');
     await expect(page.getByTestId(`block-${c3.id}`)).toHaveText('D/F♯');
     await expect(page.getByTestId(`block-${c4.id}`)).toHaveText('D/F♯');
+    await expect(page.getByTestId('chord-input')).toHaveValue('');
+    await expect(page.getByTestId('chord-input')).toBeFocused();
     const before = await ana.timeline(page);
     await page.getByTestId('chord-input').fill('/F#d/Dmin2');
     await page.getByTestId('chord-input').press('Enter');
     await expect(page.getByTestId('chord-error')).toBeVisible();
     expect(await ana.timeline(page)).toEqual(before);
-    // Clicking a block still selects; B (Split), Delete and Ctrl+Z do nothing.
-    await clickAt(CHORD_ROW, bars[12]! + 0.5);
-    expect((await ana.selection(page)).length).toBe(1);
-    await page.keyboard.press('b');
-    await page.keyboard.press('Delete');
-    await page.keyboard.press('Control+z');
-    await expect(page.getByTestId('tool-split')).toHaveAttribute('aria-pressed', 'false');
-    expect(await ana.timeline(page)).toEqual(before);
-    await page.getByTestId('write-chord-toggle').uncheck();
+    // Out of the box, the tool keys work.
+    await page.getByTestId('chord-input').press('Escape');
+    await expect(page.getByTestId('chord-input')).not.toBeFocused();
     await page.keyboard.press('b');
     await expect(page.getByTestId('tool-split')).toHaveAttribute('aria-pressed', 'true');
     await page.keyboard.press('v');
     await expect(page.getByTestId('tool-select')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('T40: Write chord name is a typing mode: click, type, Enter; Space and Delete reach the timeline', async () => {
+    const tl = await reset();
+    const box = page.getByTestId('chord-input');
+    const mid = (b: Block) => (b.start + b.end) / 2;
+    const has = async (id: number) => (await ana.timeline(page))!.chord.some((b) => b.id === id);
+    const [c5, c6, c7, c8] = [tl.chord[5]!, tl.chord[6]!, tl.chord[7]!, tl.chord[8]!];
+
+    // A key or section block doesn't focus the box; a chord block does, and clears it.
+    await clickAt(SECTION_ROW, mid(tl.section[1]!));
+    await expect(box).not.toBeFocused();
+    await clickAt(KEY_ROW, 5);
+    await expect(box).not.toBeFocused();
+    await expect(box).toBeDisabled();
+    await clickAt(CHORD_ROW, mid(c5));
+    await expect(box).toBeFocused();
+    await page.keyboard.type('Am');
+    await clickAt(CHORD_ROW, mid(c5));
+    await expect(box).toBeFocused();
+    await expect(box).toHaveValue('');
+    // Typing D/F# and Enter names it; the box stays focused and empty.
+    await page.keyboard.type('D/F#');
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId(`block-${c5.id}`)).toHaveText('D/F♯');
+    await expect(box).toHaveValue('');
+    await expect(box).toBeFocused();
+
+    // A double-click fills the box with the block's chord, text selected.
+    const p5 = await pt(CHORD_ROW, mid(c5));
+    await page.mouse.dblclick(p5.x, p5.y);
+    await expect(box).toHaveValue('D/F#');
+    await expect(box).toBeFocused();
+    expect(await box.evaluate((el: HTMLInputElement) => [el.selectionStart, el.selectionEnd])).toEqual([0, 4]);
+    await box.press('End');
+
+    // Space plays and pauses; nothing is typed.
+    await page.keyboard.press(' ');
+    await expect.poll(async () => (await ana.playback(page)).playing).toBe(true);
+    await expect.poll(async () => (await ana.playback(page)).songTime ?? 0, { timeout: 10_000 }).toBeGreaterThan(0.2);
+    await page.keyboard.press(' ');
+    await expect.poll(async () => (await ana.playback(page)).playing).toBe(false);
+    await expect(box).toHaveValue('D/F#');
+
+    // Delete with text deletes the selected block and leaves the text.
+    await page.keyboard.press('Delete');
+    await expect.poll(() => has(c5.id)).toBe(false);
+    await expect(box).toHaveValue('D/F#');
+
+    // Backspace with text edits the text; with an empty box it deletes the selected block.
+    await clickAt(CHORD_ROW, mid(c6));
+    await expect(box).toBeFocused();
+    await page.keyboard.type('Am');
+    const beforeBack = await ana.timeline(page);
+    await page.keyboard.press('Backspace');
+    await expect(box).toHaveValue('A');
+    await page.keyboard.press('Backspace');
+    await expect(box).toHaveValue('');
+    expect(await ana.timeline(page)).toEqual(beforeBack);
+    await page.keyboard.press('Backspace');
+    await expect.poll(() => has(c6.id)).toBe(false);
+
+    // Ctrl+Z with an empty box undoes the last timeline edit; with text it edits the text, not the timeline.
+    await clickAt(CHORD_ROW, mid(c7));
+    await expect(box).toBeFocused();
+    await page.keyboard.press('Control+z');
+    await expect.poll(() => has(c6.id)).toBe(true);
+    await page.keyboard.type('Em');
+    const beforeUndo = await ana.timeline(page);
+    await page.keyboard.press('Control+z');
+    await expect(box).not.toHaveValue('Em');
+    expect(await ana.timeline(page)).toEqual(beforeUndo);
+
+    // A letter bound to a tool (B: Split, V: Select) is typed instead.
+    await clickAt(CHORD_ROW, mid(c8));
+    await page.keyboard.type('bv');
+    await expect(box).toHaveValue('bv');
+    await expect(page.getByTestId('tool-split')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByTestId('tool-select')).toHaveAttribute('aria-pressed', 'true');
+
+    // Escape leaves the box; a second Escape clears the selection.
+    await page.keyboard.press('Escape');
+    await expect(box).not.toBeFocused();
+    expect((await ana.selection(page)).length).toBe(1);
+    await page.keyboard.press('Escape');
+    expect(await ana.selection(page)).toEqual([]);
   });
 
   test('rebinding a tool key; Escape while binding removes it', async () => {
@@ -385,6 +471,8 @@ test.describe('A B A B song', () => {
     await expect(page.getByTestId('tool-key-delete')).toHaveText('Q');
     await clickAt(CHORD_ROW, song.bars[3]! + 0.5);
     const id = (await ana.selection(page))[0]!;
+    // The click focused the chord box, where Q is typed (T40); out of the box, Q deletes.
+    await page.keyboard.press('Escape');
     await page.keyboard.press('q');
     await expect.poll(async () => (await ana.timeline(page))!.chord.some((b) => b.id === id)).toBe(false);
     expect(await page.evaluate(() => localStorage.getItem('mts.timelineShortcuts'))).toContain('tool:delete');
@@ -559,7 +647,7 @@ test('re-run counts the corrections and the timeline, then refills the timeline 
   expect(await ana.timeline(page)).toEqual(refilled);
 });
 
-test('a cycle 6 project (schema v3) opens as v4: its key pick is one key block, its section edits are applied', async ({ page }) => {
+test('a cycle 6 project (schema v3) opens as v5: its key pick is one key block, its section edits are applied', async ({ page }) => {
   test.setTimeout(120_000);
   await page.addInitScript(() => localStorage.setItem('mts.firstRunDone', 'yes'));
   await page.goto('./');
@@ -628,7 +716,7 @@ test('a cycle 6 project (schema v3) opens as v4: its key pick is one key block, 
         };
       }),
   );
-  expect(stored.schemaVersion).toBe(4);
+  expect(stored.schemaVersion).toBe(5);
   expect(stored.legacyEdits).toBeNull();
   expect(stored.timeline).toEqual(tl);
 });

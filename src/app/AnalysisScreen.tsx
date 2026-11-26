@@ -16,7 +16,8 @@ import { seedTimeline } from '../core/timeline/seed.ts';
 import { checkTimeline } from '../core/timeline/validate.ts';
 import { alignEdges, copyBlocks, cutBlocks, deleteBlocks, findBlock, markReviewed, mergeBlocks, nameBlocks, pasteBlocks, stepBlocks } from '../core/timeline/ops.ts';
 import type { SnapOptions } from '../core/timeline/ops.ts';
-import type { BlockName, Clipboard, Problem, Timeline } from '../core/timeline/types.ts';
+import type { Block, BlockName, Clipboard, Problem, Timeline } from '../core/timeline/types.ts';
+import { formatChord } from '../core/timeline/chords.ts';
 import { startAnalysis } from '../workers/analysisClient.ts';
 import type { AnalysisJob } from '../workers/analysisClient.ts';
 import { SongPlayer } from '../audio/songPlayer.ts';
@@ -28,6 +29,8 @@ import type { CorrectionState } from '../analysis/correctionState.ts';
 import { TimelineView } from '../analysis/TimelineView.tsx';
 import { TimelineToolbar } from '../analysis/TimelineToolbar.tsx';
 import { NamingPanel } from '../analysis/NamingPanel.tsx';
+import type { ChordBoxRequest } from '../analysis/NamingPanel.tsx';
+import { chordBoxRoute, isChordBox } from '../analysis/chordBoxKeys.ts';
 import { keyLineFromBlocks, problemPlace, problemText, rerunMessage, unreviewedWarning } from '../analysis/timelineText.ts';
 import { loadTimelineBindings, RESERVED_TIMELINE_KEYS, saveTimelineBindings, toolOfBinding } from '../analysis/timelineTools.ts';
 import type { TimelineMode, TimelineToolId } from '../analysis/timelineTools.ts';
@@ -114,7 +117,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
   const [bindings, setBindings] = useState<Bindings>(loadTimelineBindings);
   const [listeningId, setListeningId] = useState<string | null>(null);
   const [toolMessage, setToolMessage] = useState<string | null>(null);
-  const [writeMode, setWriteMode] = useState(false);
+  const [boxRequest, setBoxRequest] = useState<ChordBoxRequest | null>(null);
   const [finishView, setFinishView] = useState<FinishView>('none');
   const hoverRef = useRef<number | null>(null);
 
@@ -131,9 +134,9 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
   const problems: readonly Problem[] | null = check?.problems ?? null;
 
   // Latest values for callbacks that outlive a render (player clock, key handlers, hooks, autosave).
-  const live = useRef({ project, analysis, grid, snapGrid, cs, sel, clipboard, view, width, playhead, runState, durationSec, pickBeat, fallbackReason, bindings, listeningId, writeMode });
+  const live = useRef({ project, analysis, grid, snapGrid, cs, sel, clipboard, view, width, playhead, runState, durationSec, pickBeat, fallbackReason, bindings, listeningId });
   useLayoutEffect(() => {
-    live.current = { project, analysis, grid, snapGrid, cs, sel, clipboard, view, width, playhead, runState, durationSec, pickBeat, fallbackReason, bindings, listeningId, writeMode };
+    live.current = { project, analysis, grid, snapGrid, cs, sel, clipboard, view, width, playhead, runState, durationSec, pickBeat, fallbackReason, bindings, listeningId };
   });
 
   const autosave = useRef<Autosave<Project> | null>(null);
@@ -263,6 +266,12 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
     },
     [commit],
   );
+
+  /** A click on a chord block focuses and clears the chord name box; a double-click fills it with the block's chord (T40). */
+  const chordClick = useCallback((b: Block, fill: boolean) => {
+    const text = fill && b.row === 'chord' && b.name ? formatChord(b.name) : '';
+    setBoxRequest((r) => ({ n: (r?.n ?? 0) + 1, text, select: fill }));
+  }, []);
 
   /** Shows a finished analysis: restores its tracker's corrections, seeds the timeline if needed, makes that tracker the project's and saves. */
   const show = useCallback(
@@ -463,11 +472,15 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
     }, TAP_IDLE_SECONDS * 1000); // facts-ok: ms per second
   }, [applyTaps]);
 
-  // Keys: Space, T, Escape, Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y, and the timeline's (Design 5.5). None while Write chord name is on.
+  // Keys: Space, T, Escape, Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y, and the timeline's (Design 5.5). In the chord name box only
+  // the keys chordBoxRoute sends to the timeline act here (T40); never the tool shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const l = live.current;
-      if (l.writeMode || l.listeningId !== null || isTyping(e.target)) return;
+      if (l.listeningId !== null) return;
+      const inBox = isChordBox(e.target);
+      if (inBox ? chordBoxRoute(e, e.target.value) !== 'timeline' : isTyping(e.target)) return;
+      if (inBox && (e.key === ' ' || e.key === 'Delete')) e.preventDefault(); // never typed into the box, whatever the modifiers
       const mod = e.ctrlKey || e.metaKey;
       const k = e.key.toLowerCase();
       if (mod && !e.altKey) {
@@ -493,7 +506,8 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
         commit(r.timeline, r.selection);
         return;
       }
-      if (e.key === ' ' && !(e.target as HTMLElement).closest('button, input')) {
+      if (e.key === ' ') {
+        if (!inBox && (e.target as HTMLElement).closest('button, input')) return;
         e.preventDefault();
         togglePlay();
       } else if (e.key === 'Escape') {
@@ -832,6 +846,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
                 onSelect={select}
                 onCommit={commit}
                 hoverRef={hoverRef}
+                onChordClick={chordClick}
               />
               <TimelineToolbar
                 mode={mode}
@@ -846,7 +861,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
                 onRedo={redo}
                 message={toolMessage}
               />
-              <NamingPanel timeline={timeline} selection={sel} onName={nameSelection} writeMode={writeMode} onWriteMode={setWriteMode} />
+              <NamingPanel timeline={timeline} selection={sel} onName={nameSelection} boxRequest={boxRequest} />
             </>
           )}
 
