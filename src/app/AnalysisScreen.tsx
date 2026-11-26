@@ -620,7 +620,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
     setFinishView('none');
     const p = live.current.project;
     if (!p) return;
-    const updated: Project = { ...p, finishedAt: Date.now() };
+    const updated: Project = { ...p, finishedAt: Date.now(), finishedOnce: true };
     setProject(updated);
     live.current.project = updated;
     save(updated);

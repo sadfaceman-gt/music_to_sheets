@@ -12,6 +12,7 @@ import { ANALYSIS_SAMPLE_RATE, BEAT_TRACKERS, DEFAULT_TRACKER } from '../core/an
 import { decodeSong, ImportError } from '../audio/decode.ts';
 import type { DecodedSong } from '../audio/decode.ts';
 import * as opfs from '../audio/opfs.ts';
+import { emptyPlan } from '../core/plan/types.ts';
 import { sharedDb } from './db.ts';
 import type { MtsDb } from './db.ts';
 import { sha256Hex } from './hash.ts';
@@ -168,6 +169,9 @@ export function createProjectStore(overrides?: Partial<StoreDeps>): ProjectStore
             timeline: null,
             legacyEdits: null,
             finishedAt: null,
+            finishedOnce: false,
+            plan: emptyPlan(),
+            columnsPerBeat: null,
             tempoBpm: null,
           });
           await db.projects.put({ ...copy });
@@ -220,6 +224,9 @@ export function createProjectStore(overrides?: Partial<StoreDeps>): ProjectStore
             timeline: null,
             legacyEdits: null,
             finishedAt: null,
+            finishedOnce: false,
+            plan: emptyPlan(),
+            columnsPerBeat: null,
           tempoBpm: null,
         });
         await db.transaction('rw', db.projects, db.artifacts, async () => {

@@ -53,7 +53,7 @@ describe('parseProject migration', () => {
     expect(parseProject(again)).toEqual(again);
   });
 
-  it('migrates a v2 record through v3 to v4: corrections kept, analysis keys dropped, no key override or section edits', () => {
+  it('migrates a v2 record through v3 and v4: corrections kept, analysis keys dropped, no key override or section edits', () => {
     const v2 = { ...parseProject(v1Record()), schemaVersion: 2, tracker: 'dsp', trackers: { 'beatthis-small0': { analysisKey: 'a', corrections: [] }, dsp: { analysisKey: 'b', corrections } } };
     const p = parseProject(v2);
     expect(p.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
@@ -84,7 +84,7 @@ describe('parseProject migration', () => {
     expect(p.finishedAt).toBeNull();
   });
 
-  it('migrates a v1 record all the way to v4 with no timeline and no legacy edits', () => {
+  it('migrates a v1 record all the way to v5 with no timeline and no legacy edits', () => {
     const p = parseProject(v1Record());
     expect(p.timeline).toBeNull();
     expect(p.legacyEdits).toBeNull();
@@ -105,6 +105,31 @@ describe('parseProject migration', () => {
     const p = parseProject({ ...base, trackers: { 'beatthis-small0': { analysisKey: 'a', corrections: [] }, dsp: { corrections: [{ kind: 'half' }] } } });
     expect(p.trackers.dsp).toEqual({ analysisKey: null, corrections: [{ kind: 'half' }] });
     expect(p.legacyEdits).toBeNull();
+  });
+
+  it('migrates a v4 record to v5: an empty plan, no columns per beat, finishedOnce from finishedAt', () => {
+    const v4 = (finishedAt: number | null) => {
+      const r: Record<string, unknown> = { ...parseProject(v1Record()), schemaVersion: 4, finishedAt };
+      delete r.plan;
+      delete r.columnsPerBeat;
+      delete r.finishedOnce;
+      return r;
+    };
+    const done = parseProject(v4(7));
+    expect(done.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(done.plan).toEqual({ instances: [], partSplit: null, nextId: 1 });
+    expect(done.columnsPerBeat).toBeNull();
+    expect(done.finishedOnce).toBe(true);
+    expect(done.finishedAt).toBe(7);
+    expect(parseProject(v4(null)).finishedOnce).toBe(false);
+  });
+
+  it('keeps a v5 plan and columns per beat as stored, and refuses a bad columns per beat', () => {
+    const plan = { instances: [{ id: 1, sectionId: 3, bars: { from: 1, to: 4 }, repeatOfPrevious: false }, { id: 2, sectionId: 3, bars: null, repeatOfPrevious: true }], partSplit: 1, nextId: 3 };
+    const p = parseProject({ ...parseProject(v1Record()), plan, columnsPerBeat: 6 });
+    expect(p.plan).toEqual(plan);
+    expect(p.columnsPerBeat).toBe(6);
+    expect(() => parseProject({ ...p, columnsPerBeat: 5 })).toThrow();
   });
 
   it('throws for garbage', () => {
