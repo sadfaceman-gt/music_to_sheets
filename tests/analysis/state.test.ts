@@ -19,7 +19,7 @@ describe('correction state', () => {
     s = addCorrection(s, { kind: 'half' });
     s = undoCorrection(s);
     expect(s.corrections).toEqual([{ kind: 'double' }]);
-    expect(s.redo).toEqual([{ kind: 'correction', c: { kind: 'half' } }]);
+    expect(s.redo).toEqual([{ kind: 'corrections', added: [{ kind: 'half' }] }]);
     s = redoCorrection(s);
     expect(s.corrections).toHaveLength(2);
     expect(s.redo).toHaveLength(0);

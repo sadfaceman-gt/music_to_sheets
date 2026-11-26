@@ -24,7 +24,16 @@ function loadRowColors(): string {
   }
 }
 
-type Load = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; profile: GameProfile };
+/** The set with `id` in it or not (the same set when nothing changes). */
+function withMember(set: ReadonlySet<string>, id: string, member: boolean): ReadonlySet<string> {
+  if (set.has(id) === member) return set;
+  const next = new Set(set);
+  if (member) next.add(id);
+  else next.delete(id);
+  return next;
+}
+
+type Load ={ state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; profile: GameProfile };
 
 async function loadProfile(): Promise<GameProfile> {
   const url = `${import.meta.env.BASE_URL}profiles/growtopia-default.json`;
@@ -49,16 +58,10 @@ export function App() {
   const [route, navigate] = useRoute();
   const [openId, setOpenId] = useState<string | null>(null);
   const [analysedIds, setAnalysedIds] = useState<ReadonlySet<string>>(new Set());
+  const [finishedIds, setFinishedIds] = useState<ReadonlySet<string>>(new Set());
   const [notice, setNotice] = useState<string | null>(null);
-  const onAnalysed = useCallback((id: string, analysed: boolean) => {
-    setAnalysedIds((prev) => {
-      if (prev.has(id) === analysed) return prev;
-      const next = new Set(prev);
-      if (analysed) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  }, []);
+  const onAnalysed = useCallback((id: string, analysed: boolean) => setAnalysedIds((prev) => withMember(prev, id, analysed)), []);
+  const onFinished = useCallback((id: string, finished: boolean) => setFinishedIds((prev) => withMember(prev, id, finished)), []);
   const routeId = route.screen === 'analysis' ? route.id : null;
   const currentId = routeId ?? openId;
   if (routeId && routeId !== openId) setOpenId(routeId);
@@ -95,7 +98,13 @@ export function App() {
     <div className="flex h-screen flex-col">
       <header className="flex items-center justify-between border-b border-slate-800 px-3 py-2">
         <h1 className="text-lg font-bold">Music to Sheets</h1>
-        <Stepper route={route} openProjectId={currentId} analysed={currentId !== null && analysedIds.has(currentId)} onNavigate={navigate} />
+        <Stepper
+          route={route}
+          openProjectId={currentId}
+          analysed={currentId !== null && analysedIds.has(currentId)}
+          finished={currentId !== null && finishedIds.has(currentId)}
+          onNavigate={navigate}
+        />
         <button
           type="button"
           data-testid="settings-button"
@@ -117,7 +126,7 @@ export function App() {
       {load.state === 'ready' && session && !showFirstRun && route.screen === 'editor' && editorStore && <Editor profile={load.profile} session={session} rowColors={rowColors} store={editorStore} />}
       {load.state === 'ready' && !showFirstRun && route.screen === 'projects' && <ProjectsScreen store={getStore()} onOpen={openProject} />}
       {load.state === 'ready' && !showFirstRun && route.screen === 'analysis' && (
-        <AnalysisScreen key={route.id} store={getStore()} projectId={route.id} notice={notice} onAnalysed={onAnalysed} />
+        <AnalysisScreen key={route.id} store={getStore()} projectId={route.id} notice={notice} onAnalysed={onAnalysed} onFinished={onFinished} />
       )}
       <footer className="border-t border-slate-800 px-3 py-1 text-xs text-slate-500">
         Unofficial fan tool, not affiliated with or endorsed by Ubisoft. Growtopia is a trademark of its owner. Your audio

@@ -8,12 +8,17 @@ import { z } from 'zod';
 import { ANALYSIS_VERSION, DEFAULT_TRACKER } from '../analysis/types.ts';
 import { SECTION_LABELS } from '../analysis/types.ts';
 import type { BeatTracker, SectionLabel } from '../analysis/types.ts';
+import { CHORD_ALTERATIONS, CHORD_EXTENSIONS, CHORD_QUALITIES } from '../timeline/types.ts';
+import type { ChordAlteration, ChordExtension, ChordQualityName, Timeline } from '../timeline/types.ts';
 
 /**
  * 2 (M2b): analysis key and corrections per tracker (`trackers`), and the tracker shown (`tracker`).
  * 3 (M2c): each tracker state gains `keyOverride` (pick key) and `sectionEdits` (the section timeline edits).
+ * 4 (M2c cycle 7, Design 5.5): one Key, chord and section timeline per project (`timeline`), shared by the trackers;
+ *   `keyOverride` and `sectionEdits` go (the shown tracker's become `legacyEdits` until the timeline is seeded);
+ *   `finishedAt` records Finish analysis.
  */
-export const PROJECT_SCHEMA_VERSION = 3;
+export const PROJECT_SCHEMA_VERSION = 4;
 
 /** Longest song the app imports (Design 5.1, a memory guard). */
 export const MAX_SONG_SECONDS = 15 * 60;
@@ -89,6 +94,31 @@ export const sectionEditSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('rename'), at: z.number(), label: sectionLabelSchema }),
 ]);
 
+const spellingSchema = z.object({ letter: z.enum(['C', 'D', 'E', 'F', 'G', 'A', 'B']), accidental: z.enum(['', '#', 'b']) });
+const keyNameSchema = z.object({ tonic: spellingSchema, mode: z.enum(['major', 'minor']) });
+const chordSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('chord'),
+    root: spellingSchema,
+    quality: z.enum(CHORD_QUALITIES as unknown as [ChordQualityName, ...ChordQualityName[]]),
+    extension: z.enum(CHORD_EXTENSIONS as unknown as [ChordExtension, ...ChordExtension[]]),
+    alterations: z.array(z.enum(CHORD_ALTERATIONS as unknown as [ChordAlteration, ...ChordAlteration[]])),
+    bass: spellingSchema.nullable(),
+  }),
+  z.object({ kind: z.literal('none') }),
+]);
+const blockBase = { id: z.number().int().positive(), start: z.number().nonnegative(), end: z.number().nonnegative(), reviewed: z.boolean() };
+
+/** The Key, chord and section timeline (Design 5.5, src/core/timeline/types.ts). */
+export const timelineSchema = z.object({
+  key: z.array(z.object({ ...blockBase, row: z.literal('key'), name: keyNameSchema.nullable() })),
+  chord: z.array(z.object({ ...blockBase, row: z.literal('chord'), name: chordSchema.nullable() })),
+  section: z.array(z.object({ ...blockBase, row: z.literal('section'), name: sectionLabelSchema.nullable() })),
+  nextId: z.number().int().positive(),
+}) satisfies z.ZodType<Timeline>;
+
+const keyPickSchema = z.object({ tonic: pitchClassSchema, mode: z.enum(['major', 'minor']) });
+
 export const sourceSchema = z.object({
   fileName: z.string().min(1),
   /** Lower-case hex SHA-256 of the original file's bytes. */
@@ -101,16 +131,12 @@ export const sourceSchema = z.object({
   channels: z.number().int().positive(),
 });
 
-/** One tracker's state in a project: its cached analysis and the user's corrections on top of that tracker's grid. */
+/** One tracker's state in a project: its cached analysis and the user's beat corrections on top of that tracker's grid. */
 export const trackerStateSchema = z.object({
   /** Artifact row of this tracker's detected analysis (analysisKey(sha256, settings)), or null before it has run. */
   analysisKey: z.string().nullable(),
   /** The user's corrections, applied in order on top of this tracker's grid. */
   corrections: z.array(correctionSchema),
-  /** Pick-key correction: replaces the detected song key (null = use the detected one). */
-  keyOverride: z.object({ tonic: pitchClassSchema, mode: z.enum(['major', 'minor']) }).nullable(),
-  /** Section timeline edits, applied in order on top of this tracker's detected sections. */
-  sectionEdits: z.array(sectionEditSchema),
 });
 
 export const projectSchema = z.object({
@@ -133,6 +159,12 @@ export const projectSchema = z.object({
   trackers: z.object({ 'beatthis-small0': trackerStateSchema, dsp: trackerStateSchema }),
   /** Global tempo of the shown tracker's corrected grid, for the Projects list (null before analysis). */
   tempoBpm: z.number().nullable(),
+  /** The user's keys, chords and sections (Design 5.5); null until the first analysis seeds it. */
+  timeline: timelineSchema.nullable(),
+  /** A v3 project's pick key and section edits (its shown tracker's), applied once when the timeline is seeded, then null. */
+  legacyEdits: z.object({ keyOverride: keyPickSchema.nullable(), sectionEdits: z.array(sectionEditSchema) }).nullable(),
+  /** Epoch ms of the last Finish analysis that passed; null when not finished or edited since. */
+  finishedAt: z.number().nullable(),
 });
 
 export type Project = z.infer<typeof projectSchema>;
@@ -144,9 +176,9 @@ export function emptyTrackers(): Project['trackers'] {
   return { 'beatthis-small0': emptyTrackerState(), dsp: emptyTrackerState() };
 }
 
-/** A tracker that hasn't run, with no corrections or edits. */
+/** A tracker that hasn't run, with no corrections. */
 export function emptyTrackerState(): TrackerState {
-  return { analysisKey: null, corrections: [], keyOverride: null, sectionEdits: [] };
+  return { analysisKey: null, corrections: [] };
 }
 
 /** The shown tracker's state. */
@@ -190,7 +222,32 @@ export function migrateProjectV2(raw: Record<string, unknown>): Record<string, u
     keyOverride: null,
     sectionEdits: [],
   });
-  return { ...raw, schemaVersion: PROJECT_SCHEMA_VERSION, trackers: { 'beatthis-small0': up(trackers['beatthis-small0']), dsp: up(trackers.dsp) } };
+  return { ...raw, schemaVersion: 3, trackers: { 'beatthis-small0': up(trackers['beatthis-small0']), dsp: up(trackers.dsp) } };
+}
+
+/**
+ * v3 -> v4 (Design 13.2): keyOverride and sectionEdits leave the tracker states. The shown tracker's become
+ * `legacyEdits` (null when it had neither), which seedTimeline applies when the analysis screen first seeds the
+ * timeline from the detection; the other tracker's are dropped (the timeline is one per project). The timeline
+ * starts null and the analysis is not finished. Beat corrections and analysis keys stay.
+ */
+export function migrateProjectV3(raw: Record<string, unknown>): Record<string, unknown> {
+  const trackers = (raw.trackers ?? {}) as Record<string, Record<string, unknown> | undefined>;
+  const shown = trackers[typeof raw.tracker === 'string' ? raw.tracker : ''];
+  const keyOverride = (shown?.keyOverride ?? null) as unknown;
+  const sectionEdits = Array.isArray(shown?.sectionEdits) ? (shown.sectionEdits as unknown[]) : [];
+  const down = (t: Record<string, unknown> | undefined): Record<string, unknown> => ({
+    analysisKey: t?.analysisKey ?? null,
+    corrections: Array.isArray(t?.corrections) ? t.corrections : [],
+  });
+  return {
+    ...raw,
+    schemaVersion: 4,
+    trackers: { 'beatthis-small0': down(trackers['beatthis-small0']), dsp: down(trackers.dsp) },
+    timeline: null,
+    legacyEdits: keyOverride !== null || sectionEdits.length > 0 ? { keyOverride, sectionEdits } : null,
+    finishedAt: null,
+  };
 }
 
 /** Validates a stored record, migrating older schema versions first. Throws a ZodError when invalid. */
@@ -198,6 +255,7 @@ export function parseProject(raw: unknown): Project {
   let r = raw as Record<string, unknown> | null;
   if (r && typeof r === 'object' && r.schemaVersion === 1) r = migrateProjectV1(r);
   if (r && typeof r === 'object' && r.schemaVersion === 2) r = migrateProjectV2(r);
+  if (r && typeof r === 'object' && r.schemaVersion === 3) r = migrateProjectV3(r);
   return projectSchema.parse(r);
 }
 

@@ -1,6 +1,7 @@
 /** Shared helpers for the M1b specs: the page's test hooks and editor mouse actions. */
 import { expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import type { Timeline } from '../../src/core/timeline/types.ts';
 
 export type SpanLike<T> = { start: number; end: number; startBeat: number; endBeat: number } & T;
 export type SectionLike = SpanLike<{ label: string; confidence: number; cluster: number }>;
@@ -38,9 +39,12 @@ export interface MtsHooks {
     getChords(): SpanLike<{ root: number | null; quality: 'maj' | 'min' | 'none'; confidence: number }>[];
     getSections(): SectionLike[];
     getLevelFixes(): SpanLike<{ factor: 2 | 0.5 }>[];
-    getSectionEdits(): ({ kind: string } & Record<string, unknown>)[];
-    getKeyOverride(): { tonic: number; mode: 'major' | 'minor' } | null;
-    moveBoundary(i: number, toSec: number): void;
+    getTimeline(): Timeline | null;
+    getSelection(): number[];
+    setTimeline(tl: Timeline): void;
+    getFinishedAt(): number | null;
+    timeToX(sec: number): number;
+    xToTime(px: number): number;
   };
   __mtsView?: { cellToClient(c: number, r: number): { x: number; y: number }; getViewport(): { cellSize: number; scrollCol: number } };
 }
@@ -137,9 +141,16 @@ export const ana = {
   chords: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getChords()),
   sections: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getSections()),
   levelFixes: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getLevelFixes()),
-  sectionEdits: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getSectionEdits()),
-  keyOverride: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getKeyOverride()),
-  moveBoundary: (page: Page, i: number, toSec: number) => page.evaluate(([b, t]) => (globalThis as unknown as MtsHooks).__mtsAnalysis!.moveBoundary(b!, t!), [i, toSec] as const),
+  timeline: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getTimeline()),
+  selection: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getSelection()),
+  setTimeline: (page: Page, tl: Timeline) => page.evaluate((t) => (globalThis as unknown as MtsHooks).__mtsAnalysis!.setTimeline(t), tl),
+  finishedAt: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsAnalysis!.getFinishedAt()),
+  /** Page coordinates of time `sec` on timeline row `row` (0 keys, 1 chords, 2 sections), at the row's middle. */
+  async rowPoint(page: Page, row: number, sec: number): Promise<{ x: number; y: number }> {
+    const x = await page.evaluate((t) => (globalThis as unknown as MtsHooks).__mtsAnalysis!.timeToX(t), sec);
+    const rowBox = (await page.getByTestId(['row-key', 'row-chord', 'row-section'][row]!).boundingBox())!;
+    return { x: rowBox.x + x, y: rowBox.y + rowBox.height / 2 };
+  },
   /** Waits until the analysis is done (the import and the DSP run in the page). */
   async waitDone(page: Page) {
     await page.waitForFunction(() => (globalThis as unknown as MtsHooks).__mtsAnalysis?.getAnalysisState() === 'done', undefined, { timeout: 90_000 });

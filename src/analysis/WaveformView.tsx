@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { BeatGrid } from '../core/analysis/types.ts';
 import type { WaveformPeaks } from '../core/analysis/peaks.ts';
 import { lowerBound, nearestBeat, panByPx, pickLevel, startFromTrack, thumb, timeToX, xToTime, zoomAbout } from './viewport.ts';
@@ -28,7 +28,8 @@ interface Props {
   onPickBeat: (beat: number) => void;
 }
 
-export function WaveformView({ peaks, grid, durationSec, view, onView, onWidth, width, playhead, pickBeatMode, onSeek, onPickBeat }: Props) {
+/** Memoised: the timeline rows below change far more often than the waveform. */
+export const WaveformView = memo(function WaveformView({ peaks, grid, durationSec, view, onView, onWidth, width, playhead, pickBeatMode, onSeek, onPickBeat }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const live = useRef({ view, width, durationSec, grid, pickBeatMode, onView, onSeek, onPickBeat });
@@ -181,7 +182,7 @@ export function WaveformView({ peaks, grid, durationSec, view, onView, onWidth, 
       <Scrollbar view={view} durationSec={durationSec} width={width} onView={onView} />
     </div>
   );
-}
+});
 
 function Scrollbar({ view, durationSec, width, onView }: { view: View; durationSec: number; width: number; onView: (v: View) => void }) {
   const trackRef = useRef<HTMLDivElement>(null);

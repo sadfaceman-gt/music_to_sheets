@@ -119,6 +119,23 @@ export function saveBindings(bindings: Bindings): void {
   }
 }
 
+/** Bindings saved under another localStorage key (the analysis screen's timeline tools); `defaults` on a first run. */
+export function loadBindingsFrom(storageKey: string, defaults: Bindings): Bindings {
+  try {
+    return parseBindings(localStorage.getItem(storageKey)) ?? { ...defaults };
+  } catch {
+    return { ...defaults };
+  }
+}
+
+export function saveBindingsTo(storageKey: string, bindings: Bindings): void {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(bindings));
+  } catch {
+    // Storage can be blocked; shortcuts then last for this session only.
+  }
+}
+
 export function loadShortcutsEnabled(): boolean {
   try {
     return localStorage.getItem(ENABLED_KEY) !== 'off';
