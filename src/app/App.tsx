@@ -8,10 +8,11 @@ import { Editor } from '../editor/Editor.tsx';
 import { createEditorStore } from '../editor/store.ts';
 import { DEFAULT_ROW_COLOR_PROFILE, rowColorProfile } from '../editor/view/rowColors.ts';
 import { SettingsPanel } from './SettingsPanel.tsx';
-import { useRoute } from './router.ts';
+import { routeProjectId, useRoute } from './router.ts';
 import { Stepper } from './Stepper.tsx';
 import { ProjectsScreen } from './ProjectsScreen.tsx';
 import { AnalysisScreen } from './AnalysisScreen.tsx';
+import { PlanScreen } from './PlanScreen.tsx';
 import { getStore } from './store.ts';
 
 const ROW_COLORS_KEY = 'mts.rowColors';
@@ -62,7 +63,9 @@ export function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const onAnalysed = useCallback((id: string, analysed: boolean) => setAnalysedIds((prev) => withMember(prev, id, analysed)), []);
   const onFinished = useCallback((id: string, finished: boolean) => setFinishedIds((prev) => withMember(prev, id, finished)), []);
-  const routeId = route.screen === 'analysis' ? route.id : null;
+  const [planOpenIds, setPlanOpenIds] = useState<ReadonlySet<string>>(new Set());
+  const onPlanOpen = useCallback((id: string, open: boolean) => setPlanOpenIds((prev) => withMember(prev, id, open)), []);
+  const routeId = routeProjectId(route);
   const currentId = routeId ?? openId;
   if (routeId && routeId !== openId) setOpenId(routeId);
   const openProject = (id: string, text?: string) => {
@@ -103,6 +106,7 @@ export function App() {
           openProjectId={currentId}
           analysed={currentId !== null && analysedIds.has(currentId)}
           finished={currentId !== null && finishedIds.has(currentId)}
+          planOpen={currentId !== null && planOpenIds.has(currentId)}
           onNavigate={navigate}
         />
         <button
@@ -126,7 +130,28 @@ export function App() {
       {load.state === 'ready' && session && !showFirstRun && route.screen === 'editor' && editorStore && <Editor profile={load.profile} session={session} rowColors={rowColors} store={editorStore} />}
       {load.state === 'ready' && !showFirstRun && route.screen === 'projects' && <ProjectsScreen store={getStore()} onOpen={openProject} />}
       {load.state === 'ready' && !showFirstRun && route.screen === 'analysis' && (
-        <AnalysisScreen key={route.id} store={getStore()} projectId={route.id} notice={notice} onAnalysed={onAnalysed} onFinished={onFinished} />
+        <AnalysisScreen
+          key={route.id}
+          store={getStore()}
+          projectId={route.id}
+          profile={load.profile}
+          notice={notice}
+          onAnalysed={onAnalysed}
+          onFinished={onFinished}
+          onPlanOpen={onPlanOpen}
+        />
+      )}
+      {load.state === 'ready' && !showFirstRun && route.screen === 'plan' && (
+        <PlanScreen
+          key={route.id}
+          store={getStore()}
+          projectId={route.id}
+          profile={load.profile}
+          onNavigate={navigate}
+          onAnalysed={onAnalysed}
+          onFinished={onFinished}
+          onPlanOpen={onPlanOpen}
+        />
       )}
       <footer className="border-t border-slate-800 px-3 py-1 text-xs text-slate-500">
         Unofficial fan tool, not affiliated with or endorsed by Ubisoft. Growtopia is a trademark of its owner. Your audio
