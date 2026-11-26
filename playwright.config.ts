@@ -20,7 +20,7 @@ export default defineConfig({
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
   ],
   webServer: {
-    command: `npm run build && npx vite preview --port ${port} --strictPort`,
+    command: `npm run build && exec node_modules/.bin/vite preview --port ${port} --strictPort`,
     url: `http://localhost:${port}/music_to_sheets/`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

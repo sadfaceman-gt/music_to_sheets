@@ -51,6 +51,14 @@ export function barsIn(beats: readonly number[], downTimes: readonly number[], s
     bars.push({ start: edges[i]!, end: b, beats: Math.max(0, hi - lo) });
     lo = Math.max(lo, hi);
   }
+  // A bar with no beat (a pickup before the song's first beat, a tail after its last) joins its neighbour, so the
+  // planner never lists or trims an empty bar (8-ui: the A B A B song's first section showed 9 bars, one empty).
+  for (let i = bars.length - 1; i >= 0 && bars.length > 1; i--) {
+    if (bars[i]!.beats > 0) continue;
+    if (i > 0) bars[i - 1] = { ...bars[i - 1]!, end: bars[i]!.end };
+    else bars[1] = { ...bars[1]!, start: bars[0]!.start };
+    bars.splice(i, 1);
+  }
   return bars;
 }
 

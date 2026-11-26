@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { BeatGrid } from '../../../src/core/analysis/types.ts';
 import { applyCorrections } from '../../../src/core/analysis/corrections.ts';
 import { barsBetween, clipBars, fitHelpers, measurePlan, planSections, repeatOffers, separationScope, worldBpm } from '../../../src/core/plan/measure.ts';
 import { applyFit, setRepeat, setPartSplit } from '../../../src/core/plan/edit.ts';
@@ -19,6 +20,18 @@ describe('bars', () => {
     expect(bars.map((b) => b.beats)).toEqual([2, 4, 4, 3, 3, 2, 2, 2]);
     expect(bars.map((b) => b.start)).toEqual([0, 1.5, 3.5, 5.5, 7, 8.5, 10, 11.5]);
     expect(bars[bars.length - 1]!.end).toBe(METER_DUR);
+  });
+
+  it('a bar with no beat joins its neighbour: a pickup before the first beat, a tail after the last (8-ui)', () => {
+    // The A B A B song: the section starts at 0, the first beat and downbeat at 0.25 s.
+    const g: BeatGrid = { beats: [0.25, 0.75, 1.25, 1.75, 2.25, 2.75, 3.25, 3.75], downbeats: [0, 4], meter: [{ startBeat: 0, signature: { num: 4, den: 4 }, beatsPerBar: 4 }] };
+    const bars = barsBetween(g, 0, 4.25);
+    expect(bars.map((b) => b.beats)).toEqual([4, 4]);
+    expect(bars.map((b) => [b.start, b.end])).toEqual([[0, 2.25], [2.25, 4.25]]);
+    // A tail bar past the last beat: 4.25 is a downbeat time with no beat after it.
+    const tail = barsBetween({ ...g, beats: [...g.beats, 4.25], downbeats: [0, 4, 8] }, 0, 5);
+    expect(tail.map((b) => b.beats)).toEqual([4, 4, 1]);
+    expect(barsBetween(g, 4, 4.25)).toEqual([{ start: 4, end: 4.25, beats: 0 }]);
   });
 
   it('a downbeat on the section start is not a cut; a section ending off a bar keeps its part bar', () => {
