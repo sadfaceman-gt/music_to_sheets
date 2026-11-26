@@ -292,6 +292,8 @@ export function PlanScreen({ store, projectId, profile, onNavigate, onAnalysed, 
       }
       if (e.key === ' ' && !e.altKey) {
         e.preventDefault();
+        // A focused button would also take the Space as a click on release.
+        if ((e.target as HTMLElement | null)?.closest?.('button')) (e.target as HTMLElement).blur();
         if (live.current.playingId !== null) stopPlaying();
         else if (lastPlayed.current !== null) playInstance(lastPlayed.current);
       }
