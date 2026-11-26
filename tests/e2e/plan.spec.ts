@@ -6,7 +6,8 @@
 import { expect, test } from '@playwright/test';
 import type { Browser, Locator, Page } from '@playwright/test';
 import { ana, plan } from './helpers.ts';
-import { fixture, importAbab, inst, planOf } from './planFixture.ts';
+import type { MtsHooks } from './helpers.ts';
+import { finishAndOpenPlan, fixture, importAbab, inst, planOf } from './planFixture.ts';
 import type { Song } from './planFixture.ts';
 import type { Timeline } from '../../src/core/timeline/types.ts';
 import type { Plan } from '../../src/core/plan/types.ts';
@@ -64,21 +65,23 @@ test.describe('Plan step on the A B A B song', () => {
     tl = fixture(song);
     S = tl.section.map((s) => s.id);
     projectId = await ana.projectId(page);
+    // Plan is disabled until Finish analysis passes (a failed test restarts the worker, so this runs per worker).
+    await expect(page.getByTestId('step-plan')).toBeDisabled();
+    await expect(page.getByTestId('step-plan')).toHaveText('3 Plan');
+    await expect(page.getByTestId('step-editor')).toHaveText('4 Editor');
+    await finishAndOpenPlan(page, tl);
   });
   test.afterAll(async () => {
     await page.close();
   });
+  /** Each test starts on the Plan step at 4 columns per beat. */
+  test.beforeEach(async () => {
+    if (!(await page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsPlan !== undefined))) await openPlan();
+    if ((await plan.columnsPerBeat(page)) !== 4) await page.getByTestId('plan-columns-per-beat').selectOption('4');
+  });
 
-  test('Plan is disabled until Finish analysis passes, then opens with an empty plan and the song sections', async () => {
-    await expect(page.getByTestId('step-plan')).toBeDisabled();
-    await expect(page.getByTestId('step-plan')).toHaveText('3 Plan');
-    await expect(page.getByTestId('step-editor')).toHaveText('4 Editor');
-    await ana.setTimeline(page, tl);
-    await expect.poll(() => ana.timeline(page)).toEqual(tl);
-    await page.getByTestId('finish-analysis').click();
-    await expect(page.getByTestId('finished-badge')).toBeVisible();
+  test('after Finish analysis, Plan opens with an empty plan and the song sections', async () => {
     await expect(page.getByTestId('step-plan')).toBeEnabled();
-    await openPlan();
     expect(page.url()).toContain(`/project/${projectId}/plan`);
     await expect(page.getByTestId('step-plan')).toHaveAttribute('aria-current', 'step');
     expect((await plan.get(page)).instances).toEqual([]);
