@@ -41,6 +41,8 @@ interface Props {
   onAnalysed: (id: string, analysed: boolean) => void;
   onFinished: (id: string, finished: boolean) => void;
   onPlanOpen: (id: string, open: boolean) => void;
+  /** The plan has at least one instance: the Stems step is open (Design 4). */
+  onStemsOpen: (id: string, open: boolean) => void;
 }
 
 const button = 'rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700 disabled:opacity-40';
@@ -72,7 +74,7 @@ function rowMids(list: HTMLElement | null, skip: number): number[] {
 
 type Load ={ state: 'loading' } | { state: 'error'; message: string } | { state: 'ready' };
 
-export function PlanScreen({ store, projectId, profile, onNavigate, onAnalysed, onFinished, onPlanOpen }: Props) {
+export function PlanScreen({ store, projectId, profile, onNavigate, onAnalysed, onFinished, onPlanOpen, onStemsOpen }: Props) {
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const [project, setProject] = useState<Project | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
@@ -106,6 +108,11 @@ export function PlanScreen({ store, projectId, profile, onNavigate, onAnalysed, 
   const offers: RepeatOffer[] = useMemo(() => (plan && ctx ? repeatOffers(plan, ctx) : []), [plan, ctx]);
   const fits: FitSuggestion[] = useMemo(() => (plan && ctx ? fitHelpers(plan, ctx) : []), [plan, ctx]);
   const scope: SeparationScope | null = useMemo(() => (plan && ctx ? separationScope(plan, ctx) : null), [plan, ctx]);
+  const hasInstances = (plan?.instances.length ?? 0) > 0;
+  useEffect(() => {
+    if (plan) onStemsOpen(projectId, hasInstances);
+  }, [plan, hasInstances, projectId, onStemsOpen]);
+  const repeatsLeftOut = measure?.instances.some((i) => i.present && i.repeat) ?? false;
   const sections = useMemo(() => (timeline && grid ? planSections(timeline, grid, cpb) : []), [timeline, grid, cpb]);
   const barCounts = useMemo(() => new Map(sections.map((s) => [s.sectionId, s.bars.length])), [sections]);
   const offerMap = useMemo(() => new Map(offers.map((o) => [o.instanceId, o])), [offers]);
@@ -607,6 +614,23 @@ export function PlanScreen({ store, projectId, profile, onNavigate, onAnalysed, 
           </div>
 
           <SeparationBar scope={scope} durationSec={durationSec} playhead={playhead} />
+          {repeatsLeftOut && (
+            <p data-testid="plan-separation-repeats" className="text-xs text-slate-400">
+              Repeat instances are left out: they play the same stretch of sheet music.
+            </p>
+          )}
+          <div className="flex justify-end">
+            <button
+              type="button"
+              data-testid="plan-to-stems"
+              className="rounded bg-sky-700 px-3 py-1 text-sm text-white hover:bg-sky-600 disabled:opacity-40"
+              disabled={!hasInstances}
+              title={hasInstances ? undefined : 'Opens once the plan has a section'}
+              onClick={() => onNavigate({ screen: 'stems', id: projectId })}
+            >
+              Go to Stems
+            </button>
+          </div>
         </>
       )}
     </main>

@@ -60,6 +60,7 @@ function setup(over: Partial<StoreDeps> = {}) {
     persist,
     estimate: async () => ({ usage: 5, quota: 10 }),
     persisted: async () => true,
+    deleteStems: async () => undefined,
     ...over,
   });
   return { store, db, o, persist };
@@ -245,6 +246,17 @@ describe('delete', () => {
     expect(await store.list()).toEqual([]);
     expect(o.files.size).toBe(0);
     expect(await db.artifacts.count()).toBe(0);
+  });
+
+  it("deletes the project's stem files, also when its source is shared (M3a)", async () => {
+    const deleteStems = vi.fn(async () => undefined);
+    const { store, db } = setup({ deleteStems });
+    const a = (await store.importFile(song('a.mp3', 'a'))).project;
+    await db.projects.put({ ...a, id: 'twin' });
+    await store.delete(a.id);
+    expect(deleteStems).toHaveBeenCalledWith(a.id);
+    await store.delete('missing');
+    expect(deleteStems).toHaveBeenCalledTimes(1);
   });
 
   it('keeps shared source files and peaks while another project uses them', async () => {
