@@ -33,7 +33,7 @@ export function overlapWindow(length: number): Float32Array {
  * for the first segment of a range). Returns the samples that are final, from the tail's start (or 0) up to the next
  * segment's start (or the range end), and the new tail. Inputs are not mutated.
  *
- * Contract stub: implemented by 9-core.
+ * Sums and weights stay float32 and are added in demucs-web's order, so the result is bit-identical to its output.
  */
 export function accumulateSegment(
   segment: Segment,
@@ -41,9 +41,57 @@ export function accumulateSegment(
   tail: OverlapTail | null,
   lengthSamples: number,
 ): AccumulateResult {
-  void segment;
-  void output;
-  void tail;
-  void lengthSamples;
-  throw new Error('accumulateSegment: not implemented yet (9-core)');
+  const last = segment.start + SEGMENT_STRIDE >= lengthSamples;
+  const regionStart = tail ? tail.start : 0;
+  const boundary = last ? lengthSamples : segment.start + SEGMENT_STRIDE;
+  const segEnd = segment.start + segment.length;
+  const tailEnd = tail ? tail.start + tail.weights.length : regionStart;
+  const end = Math.max(boundary, segEnd, tailEnd);
+  const n = Math.max(0, end - regionStart);
+  const tracks = Math.max(output.length, tail?.sums.length ?? 0);
+
+  const weights = new Float32Array(n);
+  if (tail) weights.set(tail.weights, tail.start - regionStart);
+  const sums: Float32Array[][] = [];
+  for (let t = 0; t < tracks; t++) {
+    const row: Float32Array[] = [];
+    for (let c = 0; c < 2; c++) {
+      const a = new Float32Array(n);
+      const prev = tail?.sums[t]?.[c];
+      if (tail && prev) a.set(prev, tail.start - regionStart);
+      row.push(a);
+    }
+    sums.push(row);
+  }
+
+  // demucs-web: outputs[t][start + i] += val * window[i]; weights[start + i] += window[i] (all float32 arrays).
+  const w = overlapWindow(segment.length);
+  const off = segment.start - regionStart;
+  for (let t = 0; t < output.length; t++) {
+    for (let c = 0; c < 2; c++) {
+      const src = output[t]?.[c];
+      if (!src) continue;
+      const dst = sums[t]![c]!;
+      for (let i = 0; i < segment.length; i++) dst[off + i] = dst[off + i]! + (src[i] ?? 0) * w[i]!;
+    }
+  }
+  for (let i = 0; i < segment.length; i++) weights[off + i] = weights[off + i]! + w[i]!;
+
+  // demucs-web: if (weights[i] > 0) outputs[t][i] /= weights[i]; a zero weight leaves the (zero) sum.
+  const finalLen = Math.max(0, Math.min(boundary, end) - regionStart);
+  const final = sums.map((row) =>
+    row.map((a) => {
+      const f = a.slice(0, finalLen);
+      for (let i = 0; i < finalLen; i++) {
+        const wi = weights[i]!;
+        if (wi > 0) f[i] = f[i]! / wi;
+      }
+      return f;
+    }),
+  );
+
+  const nextTail: OverlapTail | null = last
+    ? null
+    : { start: regionStart + finalLen, sums: sums.map((row) => row.map((a) => a.slice(finalLen))), weights: weights.slice(finalLen) };
+  return { finalStart: regionStart, final, tail: nextTail };
 }
