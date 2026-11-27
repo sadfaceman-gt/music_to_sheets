@@ -7,7 +7,9 @@
  *
  * Contract: types final; startSeparation implemented by 9-ml.
  */
+import * as Comlink from 'comlink';
 import type { SeparationProgress, StemRange } from '../core/stems/types.ts';
+import type { SeparationWorkerApi } from './separation.worker.ts';
 
 export interface SeparationRequest {
   projectId: string;
@@ -41,9 +43,59 @@ export interface SeparationJob {
   cancel(): void;
 }
 
-/** Stub: 9-ml. */
+const PROGRESS_INTERVAL_MS = 100; // facts-ok: about 10 progress updates per second
+
+/**
+ * Starts a separation run in a new worker. The model's bytes are transferred (request.model is detached afterwards).
+ * Progress is throttled to about 10 per second (segment ends always pass); onSegmentSaved is never throttled.
+ */
 export function startSeparation(request: SeparationRequest, callbacks: SeparationCallbacks = {}): SeparationJob {
-  void request;
-  void callbacks;
-  return { promise: Promise.reject(new Error('startSeparation: not implemented yet (9-ml)')), cancel: () => undefined };
+  if (request.model.byteLength === 0) {
+    // A model array already transferred to an earlier run is detached: load it again (loadDemucsModel reads the cache).
+    return { promise: Promise.reject(new Error('startSeparation: the model bytes are empty (already transferred to an earlier run?).')), cancel: () => undefined };
+  }
+  const worker = new Worker(new URL('./separation.worker.ts', import.meta.url), { type: 'module' });
+  const remote = Comlink.wrap<SeparationWorkerApi>(worker);
+  let finished = false;
+  let rejectJob: (e: unknown) => void = () => {};
+
+  let last = 0;
+  let lastDone = -1;
+  const onProgress = (p: SeparationProgress): void => {
+    const now = Date.now();
+    const done = p.segmentsDone !== lastDone;
+    if (!done && now - last < PROGRESS_INTERVAL_MS && p.fraction < 1) return;
+    last = now;
+    lastDone = p.segmentsDone;
+    callbacks.onProgress?.(p);
+  };
+
+  const { model, ...rest } = request;
+  const transfer = model.byteOffset === 0 && model.byteLength === model.buffer.byteLength ? model : model.slice();
+  const promise = new Promise<SeparationOutcome>((resolve, reject) => {
+    rejectJob = reject;
+    remote
+      .separate(
+        Comlink.transfer({ ...rest, model: transfer }, [transfer.buffer as ArrayBuffer]),
+        callbacks.onProgress ? Comlink.proxy(onProgress) : undefined,
+        callbacks.onSegmentSaved ? Comlink.proxy(callbacks.onSegmentSaved) : undefined,
+      )
+      .then((r) => {
+        if (r.fallbackReason) console.warn(r.fallbackReason);
+        resolve({ backend: r.backend, elapsedMs: r.elapsedMs });
+      }, reject);
+  }).finally(() => {
+    finished = true;
+    worker.terminate();
+  });
+
+  return {
+    promise,
+    cancel() {
+      if (finished) return;
+      finished = true;
+      worker.terminate();
+      rejectJob(new DOMException('Separation cancelled', 'AbortError'));
+    },
+  };
 }
