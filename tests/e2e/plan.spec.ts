@@ -68,7 +68,7 @@ test.describe('Plan step on the A B A B song', () => {
     // Plan is disabled until Finish analysis passes (a failed test restarts the worker, so this runs per worker).
     await expect(page.getByTestId('step-plan')).toBeDisabled();
     await expect(page.getByTestId('step-plan')).toHaveText('3 Plan');
-    await expect(page.getByTestId('step-editor')).toHaveText('4 Editor');
+    await expect(page.getByTestId('step-editor')).toHaveText('5 Editor');
     await finishAndOpenPlan(page, tl);
   });
   test.afterAll(async () => {

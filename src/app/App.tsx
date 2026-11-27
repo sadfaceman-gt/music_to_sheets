@@ -13,7 +13,9 @@ import { Stepper } from './Stepper.tsx';
 import { ProjectsScreen } from './ProjectsScreen.tsx';
 import { AnalysisScreen } from './AnalysisScreen.tsx';
 import { PlanScreen } from './PlanScreen.tsx';
+import { StemsScreen } from './StemsScreen.tsx';
 import { getStore } from './store.ts';
+import { savesSettled } from './pendingSaves.ts';
 
 const ROW_COLORS_KEY = 'mts.rowColors';
 
@@ -65,9 +67,28 @@ export function App() {
   const onFinished = useCallback((id: string, finished: boolean) => setFinishedIds((prev) => withMember(prev, id, finished)), []);
   const [planOpenIds, setPlanOpenIds] = useState<ReadonlySet<string>>(new Set());
   const onPlanOpen = useCallback((id: string, open: boolean) => setPlanOpenIds((prev) => withMember(prev, id, open)), []);
+  const [stemsOpenIds, setStemsOpenIds] = useState<ReadonlySet<string>>(new Set());
+  const onStemsOpen = useCallback((id: string, open: boolean) => setStemsOpenIds((prev) => withMember(prev, id, open)), []);
   const routeId = routeProjectId(route);
   const currentId = routeId ?? openId;
   if (routeId && routeId !== openId) setOpenId(routeId);
+  // The Stems step opens once the plan has an instance (Design 4): read it from the stored project whenever the open
+  // project or the screen changes; the Plan and Stems screens report it as it changes.
+  useEffect(() => {
+    if (currentId === null) return;
+    let cancelled = false;
+    savesSettled()
+      .then(() => getStore().get(currentId))
+      .then(
+        (p) => {
+          if (!cancelled && p) onStemsOpen(p.id, p.plan.instances.length > 0);
+        },
+        () => undefined,
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, [currentId, route.screen, onStemsOpen]);
   const openProject = (id: string, text?: string) => {
     setNotice(text ?? null);
     navigate({ screen: 'analysis', id });
@@ -107,6 +128,7 @@ export function App() {
           analysed={currentId !== null && analysedIds.has(currentId)}
           finished={currentId !== null && finishedIds.has(currentId)}
           planOpen={currentId !== null && planOpenIds.has(currentId)}
+          stemsOpen={currentId !== null && stemsOpenIds.has(currentId)}
           onNavigate={navigate}
         />
         <button
@@ -151,7 +173,11 @@ export function App() {
           onAnalysed={onAnalysed}
           onFinished={onFinished}
           onPlanOpen={onPlanOpen}
+          onStemsOpen={onStemsOpen}
         />
+      )}
+      {load.state === 'ready' && !showFirstRun && route.screen === 'stems' && (
+        <StemsScreen key={route.id} store={getStore()} projectId={route.id} profile={load.profile} onNavigate={navigate} onStemsOpen={onStemsOpen} />
       )}
       <footer className="border-t border-slate-800 px-3 py-1 text-xs text-slate-500">
         Unofficial fan tool, not affiliated with or endorsed by Ubisoft. Growtopia is a trademark of its owner. Your audio
