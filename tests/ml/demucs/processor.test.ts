@@ -123,7 +123,15 @@ describe('runSegment matches demucs-web separate() on one segment', () => {
       // windowed output by the same window: the result is the segment output (0 where the window is 0, at i = 0).
       // A full-length stretch gets a second segment from SEGMENT_STRIDE on: compare only before it.
       const end = Math.min(n, SEGMENT_STRIDE);
-      const proc = new ref.DemucsProcessor({ ort: { Tensor: class { constructor(_t: string, public data: Float32Array, public dims: number[]) {} } } });
+      class Tensor {
+        data: Float32Array;
+        dims: number[];
+        constructor(_type: string, data: Float32Array, dims: number[]) {
+          this.data = data;
+          this.dims = dims;
+        }
+      }
+      const proc = new ref.DemucsProcessor({ ort: { Tensor } });
       proc.session = { inputNames: theirs.inputNames, outputNames: theirs.outputNames, run: theirs.run.bind(theirs) };
       const sep = await proc.separate(l, r);
 
