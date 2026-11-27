@@ -8,6 +8,8 @@ export default defineConfig({
   testDir: 'tests/e2e',
   testMatch: '**/*.spec.ts',
   fullyParallel: true,
+  // Each worker runs a browser with the ONNX model, so local runs use 3 (PW_WORKERS overrides); CI keeps the default.
+  workers: process.env.CI ? undefined : Number(process.env.PW_WORKERS ?? 3),
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',

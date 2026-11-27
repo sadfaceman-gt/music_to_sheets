@@ -19,5 +19,7 @@ export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
     environment: 'node',
+    // Local runs stay light so the PC doesn't lag (VITEST_MAX_WORKERS overrides); CI keeps the default.
+    maxWorkers: process.env.CI ? undefined : Number(process.env.VITEST_MAX_WORKERS ?? 6),
   },
 });

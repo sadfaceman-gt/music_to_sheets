@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Run a heavy command (tests, builds) at low priority so the desktop stays responsive:
+# it gets only spare CPU and disk time, and its memory is reclaimed before it pushes
+# other apps into swap. Usage: tools/low npm test   (or: tools/low npx playwright test)
+# Tune with LOW_CPU_WEIGHT (default 20 of 100), LOW_IO_WEIGHT (20), LOW_MEMORY_HIGH (8G).
+set -euo pipefail
+if [ $# -eq 0 ]; then echo "usage: tools/low <command> [args...]" >&2; exit 2; fi
+if command -v systemd-run >/dev/null && systemd-run --user --scope -q true 2>/dev/null; then
+  exec systemd-run --user --scope -q \
+    -p CPUWeight="${LOW_CPU_WEIGHT:-20}" -p IOWeight="${LOW_IO_WEIGHT:-20}" \
+    -p MemoryHigh="${LOW_MEMORY_HIGH:-8G}" \
+    nice -n 10 "$@"
+fi
+# No user systemd (e.g. CI): fall back to nice alone.
+exec nice -n 10 "$@"
