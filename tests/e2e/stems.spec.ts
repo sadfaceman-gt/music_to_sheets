@@ -96,7 +96,18 @@ test.describe('Stems step on a short song', () => {
   }
 
   const separateButton = () => page.getByTestId('stems-separate');
+  /** Opens the Stems step (with section A planned if the plan is empty), so a test can run on its own. */
+  async function toStems() {
+    if (await page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsStems !== undefined)) {
+      if ((await stems.scope(page)) !== null && (await page.getByTestId('stems-not-open').count()) === 0) return;
+    }
+    await page.getByTestId('step-plan').click();
+    await plan.waitReady(page);
+    if ((await plan.get(page)).instances.length === 0) await plan.set(page, planOf([inst(1, S[0]!)]));
+    await openStems();
+  }
   async function clearModel() {
+    await toStems();
     await page.evaluate(async () => {
       await caches.delete('mts-models-v1');
       const root = await navigator.storage.getDirectory();
@@ -120,6 +131,7 @@ test.describe('Stems step on a short song', () => {
   }
   /** Makes sure the model is cached (served whole by the route). */
   async function ensureModel() {
+    await expect.poll(() => stems.modelState(page)).not.toBe('checking');
     if ((await stems.modelState(page)) === 'ready') return;
     server.mode = 'normal';
     await page.getByTestId('model-download').click();
@@ -320,8 +332,12 @@ test.describe('Stems step on a short song', () => {
     await expect.poll(async () => (await stems.run(page)).state, { timeout: 300_000, intervals: [500] }).toBe('done');
     const run = await stems.run(page);
     expect(run.started).toEqual([{ rangeId: range.id, segmentsDone: 1 }]);
-    expect(run.saved[0]).toEqual([range.id, 2]);
-    expect(run.firstProgress?.segmentsDone).toBeGreaterThanOrEqual(1);
+    // The worker first confirms where it resumes (segment 1 saved), then runs segment 2 only.
+    expect(run.saved).toEqual([
+      [range.id, 1],
+      [range.id, 2],
+    ]);
+    expect(run.firstProgress?.segmentsDone).toBe(1);
     expect(run.backend).toBe('wasm');
     s = await stems.get(page);
     expect(s.ranges[0]).toMatchObject({ id: range.id, segmentsDone: 2, status: 'done' });
