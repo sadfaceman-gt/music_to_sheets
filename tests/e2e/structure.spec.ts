@@ -776,7 +776,7 @@ test('a cycle 6 project (schema v3) opens as v5: its key pick is one key block, 
         };
       }),
   );
-  expect(stored.schemaVersion).toBe(5);
+  expect(stored.schemaVersion).toBe(6);
   expect(stored.legacyEdits).toBeNull();
   expect(stored.timeline).toEqual(tl);
 });
