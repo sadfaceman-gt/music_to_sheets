@@ -54,6 +54,11 @@ export function timeRangeText(start: number, end: number): string {
   return `${formatDuration(start)}–${formatDuration(end)}`;
 }
 
+/** "0:03 / 0:16": the time into an instance over its length (T42). */
+export function positionText(elapsed: number, length: number): string {
+  return `${formatDuration(Math.max(0, Math.min(elapsed, length)))} / ${formatDuration(Math.max(0, length))}`;
+}
+
 /** A fraction as a CSS percentage: 0.25 -> "25%". */
 export function cssPercent(fraction: number): string {
   return `${fraction * 100}%`; // facts-ok: percent

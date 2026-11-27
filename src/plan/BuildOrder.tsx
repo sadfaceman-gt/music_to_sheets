@@ -6,7 +6,9 @@
  */
 import { memo, useMemo } from 'react';
 import type { PartMeasure, PlanLimits, PlanMeasure, RepeatOffer } from '../core/plan/types.ts';
-import { barRangeText, columnsText, cssPercent, instanceLabel, meterText, offerText, timeRangeText } from './planText.ts';
+import { barRangeText, columnsText, cssPercent, instanceLabel, meterText, offerText, positionText, timeRangeText } from './planText.ts';
+import { positionFraction } from './transport.ts';
+import type { InstanceCursor } from './transport.ts';
 
 const button = 'rounded bg-slate-800 px-2 py-0.5 text-xs hover:bg-slate-700 disabled:opacity-40';
 
@@ -19,6 +21,8 @@ export interface RowHandlers {
   onRepeat: (id: number) => void;
   onUnrepeat: (id: number) => void;
   onPlay: (id: number) => void;
+  /** A press on an instance's position bar (T42): seek, and drag to scrub. */
+  onSeekPointerDown: (id: number, e: React.PointerEvent<HTMLElement>) => void;
 }
 
 export function PlanMeter({ index, part, limits }: { index: number; part: PartMeasure; limits: PlanLimits }) {
@@ -58,6 +62,8 @@ interface RowProps {
   part: number;
   offer: string | null;
   playing: boolean;
+  /** The position in this instance (song seconds) when it is the one last played or sought, else null (its start). */
+  pos: number | null;
   dragging: boolean;
   h: RowHandlers;
 }
@@ -111,6 +117,7 @@ const InstanceRow = memo(function InstanceRow(p: RowProps) {
           Section removed from the timeline
         </span>
       )}
+      {p.present && p.start !== null && p.end !== null && <InstancePlayer id={id} start={p.start} end={p.end} pos={p.pos} playing={p.playing} h={h} />}
       <span className="w-20 text-xs text-slate-400">{p.beats} beats</span>
       <span data-testid={`instance-columns-${id}`} className="w-24 font-mono text-xs tabular-nums">
         {columnsText(p.columns)}
@@ -129,9 +136,6 @@ const InstanceRow = memo(function InstanceRow(p: RowProps) {
         </button>
       )}
       <span className="ml-auto flex gap-1">
-        <button type="button" data-testid={`instance-play-${id}`} className={button} disabled={!p.present} onClick={() => h.onPlay(id)}>
-          {p.playing ? 'Stop' : 'Play'}
-        </button>
         {p.trimmed && (
           <button type="button" data-testid={`instance-trim-reset-${id}`} className={button} onClick={() => h.onResetTrim(id)}>
             All bars
@@ -148,6 +152,44 @@ const InstanceRow = memo(function InstanceRow(p: RowProps) {
   );
 });
 
+/** Play or pause, a position bar to click or drag, and the time in the instance (T42). */
+function InstancePlayer({ id, start, end, pos, playing, h }: { id: number; start: number; end: number; pos: number | null; playing: boolean; h: RowHandlers }) {
+  const time = pos ?? start;
+  const fraction = positionFraction(time, start, end);
+  return (
+    <span className="flex items-center gap-2">
+      <button
+        type="button"
+        data-testid={`instance-play-${id}`}
+        aria-label={playing ? 'Pause' : 'Play'}
+        className={`${button} w-14`}
+        onClick={() => h.onPlay(id)}
+      >
+        {playing ? 'Pause' : 'Play'}
+      </button>
+      <span
+        data-testid={`instance-seek-${id}`}
+        role="slider"
+        aria-label="Position in this instance"
+        aria-valuemin={0}
+        aria-valuemax={Math.round((end - start) * 10) / 10}
+        aria-valuenow={Math.round((time - start) * 10) / 10}
+        data-fraction={fraction}
+        title="Click or drag to move the position"
+        onPointerDown={(e) => h.onSeekPointerDown(id, e)}
+        className="relative flex h-4 w-32 cursor-pointer items-center"
+      >
+        <span className="absolute inset-x-0 h-1 rounded bg-slate-700" />
+        <span className="absolute left-0 h-1 rounded bg-sky-500" style={{ width: cssPercent(fraction) }} />
+        <span className="absolute h-3 w-3 -translate-x-1/2 rounded-full bg-slate-100" style={{ left: cssPercent(fraction) }} />
+      </span>
+      <span data-testid={`instance-time-${id}`} className="w-20 font-mono text-xs tabular-nums text-slate-300">
+        {positionText(time - start, end - start)}
+      </span>
+    </span>
+  );
+}
+
 interface Props {
   measure: PlanMeasure;
   limits: PlanLimits;
@@ -157,6 +199,8 @@ interface Props {
   trimmedIds: ReadonlySet<number>;
   offers: ReadonlyMap<number, RepeatOffer>;
   playingId: number | null;
+  /** The instance last played or sought and its position, live while playing (T42). */
+  position: InstanceCursor | null;
   draggingId: number | null;
   handlers: RowHandlers;
   onSplit: (at: number) => void;
@@ -164,7 +208,7 @@ interface Props {
   listRef: React.RefObject<HTMLDivElement | null>;
 }
 
-export function BuildOrder({ measure, limits, barCounts, trimmedIds, offers, playingId, draggingId, handlers, onSplit, onJoin, listRef }: Props) {
+export function BuildOrder({ measure, limits, barCounts, trimmedIds, offers, playingId, position, draggingId, handlers, onSplit, onJoin, listRef }: Props) {
   const labels = useMemo(() => measure.instances.map((_, i) => instanceLabel(measure.instances, i)), [measure.instances]);
   const split = measure.parts.length > 1 ? measure.parts[1]!.from : null;
   const n = measure.instances.length;
@@ -224,6 +268,7 @@ export function BuildOrder({ measure, limits, barCounts, trimmedIds, offers, pla
         part={m.part}
         offer={offer ? offerText(offer) : null}
         playing={playingId === m.id}
+        pos={position?.id === m.id ? position.time : null}
         dragging={draggingId === m.id}
         h={handlers}
       />,

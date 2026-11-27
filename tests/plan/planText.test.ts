@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { barRangeText, cssPercent, fitText, instanceLabel, meterText, offerText, ordinal, sectionName, separationText, worldBpmText } from '../../src/plan/planText.ts';
+import { barRangeText, cssPercent, fitText, instanceLabel, meterText, offerText, ordinal, positionText, sectionName, separationText, worldBpmText } from '../../src/plan/planText.ts';
 import type { InstanceMeasure, PlanLimits } from '../../src/core/plan/types.ts';
 
 const limits: PlanLimits = { worldCols: 400, colsPerBpmBeat: 4, bpmMin: 20, bpmMax: 200 };
@@ -63,5 +63,14 @@ describe('plan words', () => {
   it('writes CSS percentages', () => {
     expect(cssPercent(0.25)).toBe('25%');
     expect(cssPercent(0)).toBe('0%');
+  });
+});
+
+describe('instance position text (T42)', () => {
+  it('reads the time into the instance over its length, clamped', () => {
+    expect(positionText(0, 16)).toBe('0:00 / 0:16');
+    expect(positionText(3.2, 16)).toBe('0:03 / 0:16');
+    expect(positionText(-1, 75)).toBe('0:00 / 1:15');
+    expect(positionText(99, 16)).toBe('0:16 / 0:16');
   });
 });

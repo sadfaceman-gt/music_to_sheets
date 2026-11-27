@@ -28,6 +28,8 @@ import { barsMoved, DRAG_PX, dropIndex, trimmedRange } from '../plan/dragMath.ts
 import { record, redo as redoStep, startHistory, undo as undoStep } from '../plan/planHistory.ts';
 import type { PlanHistory, PlanState } from '../plan/planHistory.ts';
 import { fitText, GRID_NOTES, worldBpmText } from '../plan/planText.ts';
+import { resumeTime, seekTime } from '../plan/transport.ts';
+import type { InstanceCursor as Cursor } from '../plan/transport.ts';
 import { savesSettled, trackSave } from './pendingSaves.ts';
 import type { Route } from './router.ts';
 
@@ -79,6 +81,7 @@ export function PlanScreen({ store, projectId, profile, onNavigate, onAnalysed, 
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const [playingId, setPlayingId] = useState<number | null>(null);
   const [playhead, setPlayhead] = useState<number | null>(null);
+  const [cursor, setCursor] = useState<Cursor | null>(null);
 
   const limits = useMemo(() => planLimits(profile), [profile]);
   const corrections = project ? activeTracker(project).corrections : null;
@@ -199,10 +202,30 @@ export function PlanScreen({ store, projectId, profile, onNavigate, onAnalysed, 
     };
   }, [store, projectId, onAnalysed, onFinished, onPlanOpen]);
 
-  // Playing an instance: the song from its start, stopped at its end, with the click track off.
+  // Each instance's own player (T42): play and pause inside the instance's range, a position bar to seek, the click
+  // track off. Pausing keeps the position; reaching the end goes back to the start. One instance plays at a time.
   const player = useRef<SongPlayer | null>(null);
-  const playEnd = useRef<number | null>(null);
+  const playRange = useRef<{ start: number; end: number } | null>(null);
   const lastPlayed = useRef<number | null>(null);
+  const cursorRef = useRef<Cursor | null>(null);
+  const moveCursor = useCallback((c: Cursor | null) => {
+    cursorRef.current = c;
+    setCursor(c);
+  }, []);
+  const halt = useCallback(() => {
+    playRange.current = null;
+    live.current.playingId = null;
+    setPlayingId(null);
+    setPlayhead(null);
+  }, []);
+  /** The playing instance reached its end (or the song did): stop and go back to its start. */
+  const finish = useCallback(() => {
+    const id = live.current.playingId;
+    const r = playRange.current;
+    player.current?.stop();
+    halt();
+    if (id !== null && r) moveCursor({ id, time: r.start });
+  }, [halt, moveCursor]);
   const getPlayer = useCallback((): SongPlayer => {
     if (!player.current) {
       const p = new SongPlayer(
@@ -210,38 +233,57 @@ export function PlanScreen({ store, projectId, profile, onNavigate, onAnalysed, 
         () => store.loadStereo(live.current.project!),
       );
       p.setClicksOn(false);
-      p.onEnded = () => {
-        setPlayingId(null);
-        setPlayhead(null);
-      };
+      p.onEnded = () => finish();
       player.current = p;
     }
     return player.current;
-  }, [store, grid]);
-  const stopPlaying = useCallback(() => {
-    player.current?.stop();
-    playEnd.current = null;
-    setPlayingId(null);
-    setPlayhead(null);
-  }, []);
-  const playInstance = useCallback(
-    (id: number) => {
-      if (live.current.playingId === id) {
-        stopPlaying();
-        return;
-      }
+  }, [store, grid, finish]);
+  /** Pauses, keeping the position for the next Play. */
+  const pause = useCallback(() => {
+    const id = live.current.playingId;
+    const at = player.current?.stop() ?? null;
+    halt();
+    if (id !== null && at !== null) moveCursor({ id, time: at });
+  }, [halt, moveCursor]);
+  const startAt = useCallback(
+    (id: number, time: number) => {
       const m = live.current.measure?.instances.find((x) => x.id === id);
       if (!m || !m.present || m.start === null || m.end === null) return;
       lastPlayed.current = id;
       const p = getPlayer();
       p.ensureContext();
-      playEnd.current = m.end;
-      setPlayingId(id);
+      playRange.current = { start: m.start, end: m.end };
       live.current.playingId = id;
-      setPlayhead(m.start);
-      void p.play(m.start);
+      setPlayingId(id);
+      setPlayhead(time);
+      moveCursor({ id, time });
+      void p.play(time);
     },
-    [getPlayer, stopPlaying],
+    [getPlayer, moveCursor],
+  );
+  /** Play or pause an instance; Play resumes where it was paused. */
+  const playInstance = useCallback(
+    (id: number) => {
+      if (live.current.playingId === id) {
+        pause();
+        return;
+      }
+      const m = live.current.measure?.instances.find((x) => x.id === id);
+      if (!m || !m.present || m.start === null || m.end === null) return;
+      if (live.current.playingId !== null) pause();
+      const c = cursorRef.current;
+      startAt(id, resumeTime(c?.id === id ? c.time : null, m.start, m.end));
+    },
+    [pause, startAt],
+  );
+  /** Seeks an instance to `time`: while dragging the bar the audio waits; on release it plays on if it was playing. */
+  const seek = useCallback(
+    (id: number, time: number, release: boolean, resume: boolean) => {
+      lastPlayed.current = id;
+      if (release && resume) startAt(id, time);
+      else moveCursor({ id, time });
+    },
+    [startAt, moveCursor],
   );
   useEffect(() => {
     if (playingId === null) return;
@@ -249,8 +291,9 @@ export function PlanScreen({ store, projectId, profile, onNavigate, onAnalysed, 
     const frame = () => {
       const t = player.current?.position();
       if (t != null) {
-        if (playEnd.current !== null && t >= playEnd.current) {
-          stopPlaying();
+        const r = playRange.current;
+        if (r !== null && t >= r.end) {
+          finish();
           return;
         }
         setPlayhead(t);
@@ -259,7 +302,7 @@ export function PlanScreen({ store, projectId, profile, onNavigate, onAnalysed, 
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
-  }, [playingId, stopPlaying]);
+  }, [playingId, finish]);
 
   // Leaving the screen stops playback and writes pending edits.
   useEffect(() => {
@@ -294,13 +337,13 @@ export function PlanScreen({ store, projectId, profile, onNavigate, onAnalysed, 
         e.preventDefault();
         // A focused button would also take the Space as a click on release.
         if ((e.target as HTMLElement | null)?.closest?.('button')) (e.target as HTMLElement).blur();
-        if (live.current.playingId !== null) stopPlaying();
+        if (live.current.playingId !== null) pause();
         else if (lastPlayed.current !== null) playInstance(lastPlayed.current);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo, playInstance, stopPlaying]);
+  }, [undo, redo, playInstance, pause]);
 
   // Drags: reorder an instance, drag a section in from the list, trim an instance's bar range. Previewed, then one step.
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -400,8 +443,37 @@ export function PlanScreen({ store, projectId, profile, onNavigate, onAnalysed, 
       onRepeat: (id) => edit((p, c) => setRepeat(p, id, true, c)),
       onUnrepeat: (id) => edit((p, c) => setRepeat(p, id, false, c)),
       onPlay: (id) => playInstance(id),
+      onSeekPointerDown: (id, e) => {
+        e.stopPropagation();
+        const m = live.current.measure?.instances.find((x) => x.id === id);
+        const bar = e.currentTarget as HTMLElement;
+        if (e.button !== 0 || !m || !m.present || m.start === null || m.end === null) return;
+        e.preventDefault();
+        const { start, end } = m;
+        const resume = live.current.playingId === id;
+        if (live.current.playingId !== null) pause();
+        const at = (x: number) => {
+          const r = bar.getBoundingClientRect();
+          return seekTime(r.width > 0 ? (x - r.left) / r.width : 0, start, end);
+        };
+        let last = at(e.clientX);
+        seek(id, last, false, resume);
+        const move = (ev: PointerEvent) => {
+          last = at(ev.clientX);
+          seek(id, last, false, resume);
+        };
+        const up = () => {
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', up);
+          window.removeEventListener('pointercancel', up);
+          seek(id, last, true, resume);
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+        window.addEventListener('pointercancel', up);
+      },
     }),
-    [startDrag, edit, playInstance, barCounts],
+    [startDrag, edit, playInstance, pause, seek, barCounts],
   );
   const onSplit = useCallback((at: number) => edit((p, c) => setPartSplit(p, at, c)), [edit]);
   const onJoin = useCallback(() => edit((p, c) => setPartSplit(p, null, c)), [edit]);
@@ -421,7 +493,7 @@ export function PlanScreen({ store, projectId, profile, onNavigate, onAnalysed, 
       getFits: () => live.current.fits,
       getScope: () => live.current.scope!,
       setPlan: (plan: Plan) => commit({ plan }),
-      getPlayback: () => ({ playing: live.current.playingId !== null, instanceId: live.current.playingId, songTime: player.current?.position() ?? null }),
+      getPlayback: () => ({ playing: live.current.playingId !== null, instanceId: live.current.playingId, songTime: player.current?.position() ?? null, cursor: cursorRef.current }),
       getUndoDepth: () => live.current.hist?.past.length ?? 0,
     };
     return () => {
@@ -512,6 +584,7 @@ export function PlanScreen({ store, projectId, profile, onNavigate, onAnalysed, 
                 trimmedIds={trimmedIds}
                 offers={offerMap}
                 playingId={playingId}
+                position={playingId !== null ? (playhead === null ? null : { id: playingId, time: playhead }) : cursor}
                 draggingId={draggingId}
                 handlers={handlers}
                 onSplit={onSplit}

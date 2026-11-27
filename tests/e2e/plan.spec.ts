@@ -303,6 +303,63 @@ test.describe('Plan step on the A B A B song', () => {
     await expect.poll(() => plan.playback(page).then((p) => p.playing)).toBe(false);
   });
 
+  test('T42: each instance has its own player: pause keeps the position, the bar seeks and scrubs, play resumes there', async () => {
+    await setPlan(planOf([inst(1, S[1]!), inst(2, S[0]!)]));
+    const m = (await plan.measure(page)).instances[0]!;
+    const [start, end] = [m.start!, m.end!];
+    const len = end - start;
+    const play = page.getByTestId('instance-play-1');
+    const bar = page.getByTestId('instance-seek-1');
+    const pb = () => plan.playback(page);
+    await expect(page.getByTestId('instance-time-1')).toHaveText(`0:00 / ${fmt(len)}`);
+
+    // Play, then Pause: the position stays where it stopped.
+    await play.click();
+    await expect.poll(() => pb().then((p) => p.songTime ?? -1), { timeout: 10_000 }).toBeGreaterThan(start + 0.5);
+    await expect(play).toHaveText('Pause');
+    await play.click();
+    await expect.poll(() => pb().then((p) => p.playing)).toBe(false);
+    await expect(play).toHaveText('Play');
+    const paused = (await pb()).cursor!;
+    expect(paused.id).toBe(1);
+    expect(paused.time).toBeGreaterThan(start + 0.5);
+    expect(paused.time).toBeLessThan(end);
+    // Play resumes from there, not from the start.
+    await play.click();
+    await expect.poll(() => pb().then((p) => p.songTime ?? -1), { timeout: 10_000 }).toBeGreaterThan(paused.time);
+    expect((await pb()).songTime!).toBeGreaterThanOrEqual(paused.time - 0.05);
+    await play.click();
+    await expect.poll(() => pb().then((p) => p.playing)).toBe(false);
+
+    // A click on the bar seeks without playing; a drag scrubs; the time text follows.
+    const box = (await bar.boundingBox())!;
+    const x = (f: number) => box.x + box.width * f;
+    const y = box.y + box.height / 2;
+    await page.mouse.click(x(0.75), y);
+    expect((await pb()).playing).toBe(false);
+    await expect.poll(() => pb().then((p) => p.cursor!.time)).toBeCloseTo(start + 0.75 * len, 0);
+    await page.mouse.move(x(0.75), y);
+    await page.mouse.down();
+    await page.mouse.move(x(0.25), y, { steps: 6 });
+    await page.mouse.up();
+    const sought = (await pb()).cursor!.time;
+    expect(Math.abs(sought - (start + 0.25 * len))).toBeLessThan(0.05 * len);
+    await expect(page.getByTestId('instance-time-1')).toHaveText(`${fmt(sought - start)} / ${fmt(len)}`);
+    expect(await plan.get(page).then((p) => p.instances.map((i) => i.id))).toEqual([1, 2]); // the drag didn't reorder
+    // Play starts at the sought position; seeking while playing keeps playing from the new place.
+    await play.click();
+    await expect.poll(() => pb().then((p) => p.songTime ?? -1), { timeout: 10_000 }).toBeGreaterThan(sought);
+    expect((await pb()).songTime!).toBeLessThan(start + 0.6 * len);
+    await page.mouse.click(x(0.8), y);
+    await expect.poll(() => pb().then((p) => p.songTime ?? -1), { timeout: 10_000 }).toBeGreaterThan(start + 0.78 * len);
+    expect((await pb()).playing).toBe(true);
+    // Playing another instance pauses this one and keeps its place in its own bar.
+    await page.getByTestId('instance-play-2').click();
+    await expect.poll(() => pb().then((p) => p.instanceId)).toBe(2);
+    await page.getByTestId('instance-play-2').click();
+    await expect.poll(() => pb().then((p) => p.playing)).toBe(false);
+  });
+
   test('an analysis edit makes the plan stale until Finish analysis passes again', async () => {
     await setPlan(planOf([inst(1, S[0]!), inst(2, S[1]!)]));
     await page.waitForTimeout(2500);
