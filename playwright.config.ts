@@ -8,6 +8,8 @@ export default defineConfig({
   testDir: 'tests/e2e',
   testMatch: '**/*.spec.ts',
   fullyParallel: true,
+  // Each worker runs a browser with the ONNX model, so local runs use 3 (PW_WORKERS overrides); CI keeps the default.
+  workers: process.env.CI ? undefined : Number(process.env.PW_WORKERS ?? 3),
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
@@ -20,7 +22,7 @@ export default defineConfig({
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
   ],
   webServer: {
-    command: `npm run build && npx vite preview --port ${port} --strictPort`,
+    command: `npm run build && exec node_modules/.bin/vite preview --port ${port} --strictPort`,
     url: `http://localhost:${port}/music_to_sheets/`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

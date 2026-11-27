@@ -6,6 +6,12 @@ import type { MtsHooks } from './helpers.ts';
 const cell = (page: import('@playwright/test').Page, c: number, r: number) =>
   page.evaluate(([cc, rr]) => (globalThis as unknown as MtsHooks).__mtsTest!.getCell(cc!, rr!), [c, r] as const);
 
+test('the stepper has four steps; Plan waits for an open, finished project', async ({ page }) => {
+  await openEditor(page);
+  await expect(page.getByTestId('stepper').getByRole('button')).toHaveText(['1 Projects', '2 Import and analysis', '3 Plan', '4 Editor']);
+  await expect(page.getByTestId('step-plan')).toBeDisabled();
+});
+
 test('the sheet survives a trip to Projects and back', async ({ page }) => {
   await openEditor(page);
   await click(page, 3, 5);

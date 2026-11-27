@@ -16,7 +16,8 @@ import { seedTimeline } from '../core/timeline/seed.ts';
 import { checkTimeline } from '../core/timeline/validate.ts';
 import { alignEdges, copyBlocks, cutBlocks, deleteBlocks, findBlock, markReviewed, mergeBlocks, nameBlocks, pasteBlocks, stepBlocks } from '../core/timeline/ops.ts';
 import type { SnapOptions } from '../core/timeline/ops.ts';
-import type { BlockName, Clipboard, Problem, Timeline } from '../core/timeline/types.ts';
+import type { Block, BlockName, Clipboard, Problem, Timeline } from '../core/timeline/types.ts';
+import { formatChord } from '../core/timeline/chords.ts';
 import { startAnalysis } from '../workers/analysisClient.ts';
 import type { AnalysisJob } from '../workers/analysisClient.ts';
 import { SongPlayer } from '../audio/songPlayer.ts';
@@ -28,6 +29,9 @@ import type { CorrectionState } from '../analysis/correctionState.ts';
 import { TimelineView } from '../analysis/TimelineView.tsx';
 import { TimelineToolbar } from '../analysis/TimelineToolbar.tsx';
 import { NamingPanel } from '../analysis/NamingPanel.tsx';
+import type { ChordBoxRequest } from '../analysis/NamingPanel.tsx';
+import { chordBoxRoute, isChordBox } from '../analysis/chordBoxKeys.ts';
+import { loadWriteChord, saveWriteChord } from '../analysis/writeChordPref.ts';
 import { keyLineFromBlocks, problemPlace, problemText, rerunMessage, unreviewedWarning } from '../analysis/timelineText.ts';
 import { loadTimelineBindings, RESERVED_TIMELINE_KEYS, saveTimelineBindings, toolOfBinding } from '../analysis/timelineTools.ts';
 import type { TimelineMode, TimelineToolId } from '../analysis/timelineTools.ts';
@@ -37,6 +41,12 @@ import { barCount, formatBpm, formatClock, formatMeter } from '../analysis/forma
 import { readyToAutoApply, startsNewSequence, TAP_IDLE_SECONDS } from '../analysis/taps.ts';
 import { fallbackNotice, stageLabel, TRACKER_BUTTON_LABELS, trackerInfoText } from '../analysis/trackerInfo.ts';
 import { ProgressBar } from '../ui/ProgressBar.tsx';
+import type { GameProfile } from '../core/profile/schema.ts';
+import { COLUMNS_PER_BEAT, DEFAULT_COLUMNS_PER_BEAT } from '../core/plan/types.ts';
+import type { ColumnsPerBeat } from '../core/plan/types.ts';
+import { planLimits, worldBpm } from '../core/plan/measure.ts';
+import { worldBpmText } from '../plan/planText.ts';
+import { savesSettled, trackSave } from './pendingSaves.ts';
 
 type RunState = 'idle' | 'running' | 'done' | 'cancelled' | 'error';
 
@@ -51,6 +61,10 @@ interface Props {
   onAnalysed: (id: string, analysed: boolean) => void;
   /** Reports whether Finish analysis passed and nothing changed since (project.finishedAt), for the stepper. */
   onFinished: (id: string, finished: boolean) => void;
+  /** Reports whether Finish analysis has passed at least once (project.finishedOnce): the Plan step opens. */
+  onPlanOpen: (id: string, open: boolean) => void;
+  /** The Game Profile (the world BPM limits next to Column clicks). */
+  profile: GameProfile;
 }
 
 const ZOOM_STEP = 2;
@@ -74,7 +88,7 @@ function isTyping(target: EventTarget | null): boolean {
   return el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable;
 }
 
-export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinished }: Props) {
+export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinished, onPlanOpen, profile }: Props) {
   const [project, setProject] = useState<Project | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [peaks, setPeaks] = useState<WaveformPeaks | null>(null);
@@ -91,7 +105,6 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
   const [confirmRerun, setConfirmRerun] = useState(false);
   const [clicksOn, setClicksOn] = useState(true);
   const [colClicks, setColClicks] = useState(false);
-  const [colsPerBeat, setColsPerBeat] = useState(4);
   const [clickVol, setClickVol] = useState(0.7); // facts-ok: default volume
   const [songVol, setSongVol] = useState(1);
   const [fallbackReason, setFallbackReason] = useState<string | null>(null);
@@ -105,11 +118,23 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
   const [bindings, setBindings] = useState<Bindings>(loadTimelineBindings);
   const [listeningId, setListeningId] = useState<string | null>(null);
   const [toolMessage, setToolMessage] = useState<string | null>(null);
-  const [writeMode, setWriteMode] = useState(false);
+  const [boxRequest, setBoxRequest] = useState<ChordBoxRequest | null>(null);
+  const [writeChord, setWriteChord] = useState(loadWriteChord);
+  const writeChordRef = useRef(writeChord);
+  useEffect(() => {
+    writeChordRef.current = writeChord;
+  }, [writeChord]);
+  const changeWriteChord = useCallback((on: boolean) => {
+    setWriteChord(on);
+    saveWriteChord(on);
+  }, []);
   const [finishView, setFinishView] = useState<FinishView>('none');
   const hoverRef = useRef<number | null>(null);
 
   const durationSec = analysis?.durationSec ?? project?.source.durationSec ?? 0;
+  /** The user's grid (T32), shared with the Plan step and saved in the project. */
+  const colsPerBeat: ColumnsPerBeat = project?.columnsPerBeat ?? DEFAULT_COLUMNS_PER_BEAT;
+  const limits = useMemo(() => planLimits(profile), [profile]);
   const grid: BeatGrid | null = useMemo(() => (analysis ? applyCorrections(analysis.grid, cs.corrections, analysis.durationSec) : null), [analysis, cs.corrections]);
   const snapGrid = useMemo(() => (grid ? snapGridFrom(grid, durationSec) : null), [grid, durationSec]);
   const timeline = cs.timeline;
@@ -119,9 +144,9 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
   const problems: readonly Problem[] | null = check?.problems ?? null;
 
   // Latest values for callbacks that outlive a render (player clock, key handlers, hooks, autosave).
-  const live = useRef({ project, analysis, grid, snapGrid, cs, sel, clipboard, view, width, playhead, runState, durationSec, pickBeat, fallbackReason, bindings, listeningId, writeMode });
+  const live = useRef({ project, analysis, grid, snapGrid, cs, sel, clipboard, view, width, playhead, runState, durationSec, pickBeat, fallbackReason, bindings, listeningId });
   useLayoutEffect(() => {
-    live.current = { project, analysis, grid, snapGrid, cs, sel, clipboard, view, width, playhead, runState, durationSec, pickBeat, fallbackReason, bindings, listeningId, writeMode };
+    live.current = { project, analysis, grid, snapGrid, cs, sel, clipboard, view, width, playhead, runState, durationSec, pickBeat, fallbackReason, bindings, listeningId };
   });
 
   const autosave = useRef<Autosave<Project> | null>(null);
@@ -252,6 +277,13 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
     [commit],
   );
 
+  /** With Write chord name on, a click on a chord block focuses and clears the chord name box; a double-click fills it with the block's chord (T40, T43). */
+  const chordClick = useCallback((b: Block, fill: boolean) => {
+    if (!writeChordRef.current) return;
+    const text = fill && b.row === 'chord' && b.name ? formatChord(b.name) : '';
+    setBoxRequest((r) => ({ n: (r?.n ?? 0) + 1, text, select: fill }));
+  }, []);
+
   /** Shows a finished analysis: restores its tracker's corrections, seeds the timeline if needed, makes that tracker the project's and saves. */
   const show = useCallback(
     async (p: Project, result: Analysis, corrections: Correction[], reason: string | null, reseed: boolean) => {
@@ -331,6 +363,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
     let cancelled = false;
     void (async () => {
       try {
+        await savesSettled();
         const p = await store.open(projectId);
         if (cancelled) return;
         if (!p) {
@@ -344,6 +377,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
         if (cancelled) return;
         onAnalysed(p.id, activeTracker(p).analysisKey !== null);
         onFinished(p.id, p.finishedAt !== null);
+        onPlanOpen(p.id, p.finishedOnce);
         await load(p, p.tracker, false, false);
       } catch (e) {
         if (cancelled) return;
@@ -356,11 +390,11 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
       job.current?.cancel();
       job.current = null;
     };
-  }, [store, projectId, load, onAnalysed, onFinished]);
+  }, [store, projectId, load, onAnalysed, onFinished, onPlanOpen]);
 
   // Leaving the screen stops playback and writes pending corrections.
   useEffect(() => {
-    const flush = () => void autosave.current?.flush();
+    const flush = () => trackSave(autosave.current?.flush());
     window.addEventListener('pagehide', flush);
     const t = taps.current;
     return () => {
@@ -449,11 +483,15 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
     }, TAP_IDLE_SECONDS * 1000); // facts-ok: ms per second
   }, [applyTaps]);
 
-  // Keys: Space, T, Escape, Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y, and the timeline's (Design 5.5). None while Write chord name is on.
+  // Keys: Space, T, Escape, Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y, and the timeline's (Design 5.5). In the chord name box only
+  // the keys chordBoxRoute sends to the timeline act here (T40); never the tool shortcuts.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const l = live.current;
-      if (l.writeMode || l.listeningId !== null || isTyping(e.target)) return;
+      if (l.listeningId !== null) return;
+      const inBox = isChordBox(e.target);
+      if (inBox ? chordBoxRoute(e, e.target.value) !== 'timeline' : isTyping(e.target)) return;
+      if (inBox && (e.key === ' ' || e.key === 'Delete')) e.preventDefault(); // never typed into the box, whatever the modifiers
       const mod = e.ctrlKey || e.metaKey;
       const k = e.key.toLowerCase();
       if (mod && !e.altKey) {
@@ -479,7 +517,8 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
         commit(r.timeline, r.selection);
         return;
       }
-      if (e.key === ' ' && !(e.target as HTMLElement).closest('button, input')) {
+      if (e.key === ' ') {
+        if (!inBox && (e.target as HTMLElement).closest('button, input')) return;
         e.preventDefault();
         togglePlay();
       } else if (e.key === 'Escape') {
@@ -620,11 +659,22 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
     setFinishView('none');
     const p = live.current.project;
     if (!p) return;
-    const updated: Project = { ...p, finishedAt: Date.now() };
+    const updated: Project = { ...p, finishedAt: Date.now(), finishedOnce: true };
     setProject(updated);
     live.current.project = updated;
     save(updated);
     onFinished(p.id, true);
+    onPlanOpen(p.id, true);
+  };
+  /** Column clicks' grid is the project's columns per beat (shared with the Plan step): saved, not an undo step here. */
+  const chooseColumnsPerBeat = (n: ColumnsPerBeat) => {
+    getPlayer().setSubdivisions(colClicks ? n : 1);
+    const p = live.current.project;
+    if (!p) return;
+    const updated: Project = { ...p, columnsPerBeat: n };
+    setProject(updated);
+    live.current.project = updated;
+    save(updated);
   };
   const goToProblem = (p: Problem) => {
     const { time, blockId } = problemPlace(p);
@@ -807,6 +857,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
                 onSelect={select}
                 onCommit={commit}
                 hoverRef={hoverRef}
+                onChordClick={chordClick}
               />
               <TimelineToolbar
                 mode={mode}
@@ -821,7 +872,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
                 onRedo={redo}
                 message={toolMessage}
               />
-              <NamingPanel timeline={timeline} selection={sel} onName={nameSelection} writeMode={writeMode} onWriteMode={setWriteMode} />
+              <NamingPanel timeline={timeline} selection={sel} onName={nameSelection} boxRequest={boxRequest} writeChord={writeChord} onWriteChord={changeWriteChord} />
             </>
           )}
 
@@ -862,19 +913,23 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
                 data-testid="columns-per-beat"
                 className="rounded bg-slate-800 px-1 py-0.5"
                 value={colsPerBeat}
-                onChange={(e) => {
-                  const n = Number(e.target.value);
-                  setColsPerBeat(n);
-                  getPlayer().setSubdivisions(colClicks ? n : 1);
-                }}
+                onChange={(e) => chooseColumnsPerBeat(Number(e.target.value) as ColumnsPerBeat)}
               >
-                {[2, 3, 4].map((n) => (
+                {COLUMNS_PER_BEAT.map((n) => (
                   <option key={n} value={n}>
                     {n}
                   </option>
                 ))}
               </select>
             </label>
+            {tempo !== null && (
+              <span
+                data-testid="analysis-world-bpm"
+                className={`rounded px-2 py-0.5 text-sm ${worldBpm(tempo, colsPerBeat, limits).inRange ? 'bg-slate-800' : 'bg-amber-900 text-amber-100'}`}
+              >
+                {worldBpmText(worldBpm(tempo, colsPerBeat, limits), limits)}
+              </span>
+            )}
             <label className="flex items-center gap-1 text-sm">
               Click volume
               <input

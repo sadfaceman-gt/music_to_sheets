@@ -5,11 +5,13 @@
  * Pure: no DOM.
  */
 import { z } from 'zod';
+import { emptyPlan } from '../plan/types.ts';
 import { ANALYSIS_VERSION, DEFAULT_TRACKER } from '../analysis/types.ts';
 import { SECTION_LABELS } from '../analysis/types.ts';
 import type { BeatTracker, SectionLabel } from '../analysis/types.ts';
 import { CHORD_ALTERATIONS, CHORD_EXTENSIONS, CHORD_QUALITIES } from '../timeline/types.ts';
 import type { ChordAlteration, ChordExtension, ChordQualityName, Timeline } from '../timeline/types.ts';
+import type { ColumnsPerBeat, Plan } from '../plan/types.ts';
 
 /**
  * 2 (M2b): analysis key and corrections per tracker (`trackers`), and the tracker shown (`tracker`).
@@ -17,8 +19,11 @@ import type { ChordAlteration, ChordExtension, ChordQualityName, Timeline } from
  * 4 (M2c cycle 7, Design 5.5): one Key, chord and section timeline per project (`timeline`), shared by the trackers;
  *   `keyOverride` and `sectionEdits` go (the shown tracker's become `legacyEdits` until the timeline is seeded);
  *   `finishedAt` records Finish analysis.
+ * 5 (M2d cycle 8, Design 6): the section plan (`plan`), the user's columns per beat (`columnsPerBeat`, T32; null until
+ *   chosen), and `finishedOnce` (Finish analysis has passed at least once: the Plan step opens, and shows a stale
+ *   notice while `finishedAt` is null).
  */
-export const PROJECT_SCHEMA_VERSION = 4;
+export const PROJECT_SCHEMA_VERSION = 5;
 
 /** Longest song the app imports (Design 5.1, a memory guard). */
 export const MAX_SONG_SECONDS = 15 * 60;
@@ -117,6 +122,22 @@ export const timelineSchema = z.object({
   nextId: z.number().int().positive(),
 }) satisfies z.ZodType<Timeline>;
 
+const columnsPerBeatSchema = z.union([z.literal(2), z.literal(3), z.literal(4), z.literal(6), z.literal(8)]) satisfies z.ZodType<ColumnsPerBeat>;
+
+/** The section plan (Design 6, src/core/plan/types.ts). */
+export const planSchema = z.object({
+  instances: z.array(
+    z.object({
+      id: z.number().int().positive(),
+      sectionId: z.number().int().positive(),
+      bars: z.object({ from: z.number().int().nonnegative(), to: z.number().int().positive() }).nullable(),
+      repeatOfPrevious: z.boolean(),
+    }),
+  ),
+  partSplit: z.number().int().positive().nullable(),
+  nextId: z.number().int().positive(),
+}) satisfies z.ZodType<Plan>;
+
 const keyPickSchema = z.object({ tonic: pitchClassSchema, mode: z.enum(['major', 'minor']) });
 
 export const sourceSchema = z.object({
@@ -165,6 +186,12 @@ export const projectSchema = z.object({
   legacyEdits: z.object({ keyOverride: keyPickSchema.nullable(), sectionEdits: z.array(sectionEditSchema) }).nullable(),
   /** Epoch ms of the last Finish analysis that passed; null when not finished or edited since. */
   finishedAt: z.number().nullable(),
+  /** Finish analysis has passed at least once (the Plan step is open; stale while finishedAt is null). */
+  finishedOnce: z.boolean(),
+  /** The build order (Design 6); empty for a new project. */
+  plan: planSchema,
+  /** The user's columns per beat (T32, Design 9.1), shared by the Plan step and Column clicks; null until chosen. */
+  columnsPerBeat: columnsPerBeatSchema.nullable(),
 });
 
 export type Project = z.infer<typeof projectSchema>;
@@ -250,12 +277,18 @@ export function migrateProjectV3(raw: Record<string, unknown>): Record<string, u
   };
 }
 
+/** v4 -> v5 (Design 6): an empty plan, no columns per beat chosen, and finishedOnce from finishedAt. */
+export function migrateProjectV4(raw: Record<string, unknown>): Record<string, unknown> {
+  return { ...raw, schemaVersion: 5, finishedOnce: raw.finishedAt !== null && raw.finishedAt !== undefined, plan: emptyPlan(), columnsPerBeat: null };
+}
+
 /** Validates a stored record, migrating older schema versions first. Throws a ZodError when invalid. */
 export function parseProject(raw: unknown): Project {
   let r = raw as Record<string, unknown> | null;
   if (r && typeof r === 'object' && r.schemaVersion === 1) r = migrateProjectV1(r);
   if (r && typeof r === 'object' && r.schemaVersion === 2) r = migrateProjectV2(r);
   if (r && typeof r === 'object' && r.schemaVersion === 3) r = migrateProjectV3(r);
+  if (r && typeof r === 'object' && r.schemaVersion === 4) r = migrateProjectV4(r);
   return projectSchema.parse(r);
 }
 
