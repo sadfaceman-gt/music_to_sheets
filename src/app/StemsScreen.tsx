@@ -39,6 +39,9 @@ interface Props {
   projectId: string;
   profile: GameProfile;
   onNavigate: (route: Route) => void;
+  onAnalysed: (id: string, analysed: boolean) => void;
+  onFinished: (id: string, finished: boolean) => void;
+  onPlanOpen: (id: string, open: boolean) => void;
   onStemsOpen: (id: string, open: boolean) => void;
 }
 
@@ -70,7 +73,7 @@ function trySeparated(stems: ProjectStems, spans: SampleSpan[]): { pieces: Piece
   }
 }
 
-export function StemsScreen({ store, projectId, profile, onNavigate, onStemsOpen }: Props) {
+export function StemsScreen({ store, projectId, profile, onNavigate, onAnalysed, onFinished, onPlanOpen, onStemsOpen }: Props) {
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const [project, setProject] = useState<Project | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
@@ -157,6 +160,10 @@ export function StemsScreen({ store, projectId, profile, onNavigate, onStemsOpen
           () => 0,
         );
         if (cancelled) return;
+        // The stepper's state, as the other project screens report it (a reload can land here directly).
+        onAnalysed(p.id, a !== null);
+        onFinished(p.id, p.finishedAt !== null);
+        onPlanOpen(p.id, p.finishedOnce);
         onStemsOpen(p.id, p.plan.instances.length > 0);
         live.current.project = p;
         setProject(p);
@@ -170,7 +177,7 @@ export function StemsScreen({ store, projectId, profile, onNavigate, onStemsOpen
     return () => {
       cancelled = true;
     };
-  }, [store, projectId, onStemsOpen]);
+  }, [store, projectId, onAnalysed, onFinished, onPlanOpen, onStemsOpen]);
 
   // Separation.
   const job = useRef<SeparationJob | null>(null);

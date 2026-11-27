@@ -177,7 +177,17 @@ export function App() {
         />
       )}
       {load.state === 'ready' && !showFirstRun && route.screen === 'stems' && (
-        <StemsScreen key={route.id} store={getStore()} projectId={route.id} profile={load.profile} onNavigate={navigate} onStemsOpen={onStemsOpen} />
+        <StemsScreen
+          key={route.id}
+          store={getStore()}
+          projectId={route.id}
+          profile={load.profile}
+          onNavigate={navigate}
+          onAnalysed={onAnalysed}
+          onFinished={onFinished}
+          onPlanOpen={onPlanOpen}
+          onStemsOpen={onStemsOpen}
+        />
       )}
       <footer className="border-t border-slate-800 px-3 py-1 text-xs text-slate-500">
         Unofficial fan tool, not affiliated with or endorsed by Ubisoft. Growtopia is a trademark of its owner. Your audio

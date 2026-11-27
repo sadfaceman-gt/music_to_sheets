@@ -283,9 +283,11 @@ test.describe('Stems step on a short song', () => {
     expect(await stems.modelState(page)).toBe('error');
     await page.getByTestId('model-file').setInputFiles(MODEL_FILE);
     await expect(page.getByTestId('model-status')).toHaveText('Model ready (180.5 MB, cached)', { timeout: 120_000 });
-    // Cached: a reload finds it.
+    // Cached: a reload finds it. The stepper knows the project after a reload on this step.
     await reloadStems();
     await expect(page.getByTestId('model-status')).toHaveText('Model ready (180.5 MB, cached)');
+    await expect(page.getByTestId('step-plan')).toBeEnabled();
+    await expect(page.getByTestId('step-analysis')).toHaveText('2 Import and analysis (finished)');
   });
 
   test('separating on WASM: cancel after the first segment, resume after a reload from segment 2, four stems', async () => {
