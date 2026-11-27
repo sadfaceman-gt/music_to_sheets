@@ -35,6 +35,11 @@ export interface SeparationCallbacks {
 export interface SeparationOutcome {
   backend: 'webgpu' | 'wasm';
   elapsedMs: number;
+  /**
+   * Why the run moved from WebGPU to WASM, or null. On a 4 GB GPU the fp32 model runs out of GPU memory
+   * (VK_ERROR_OUT_OF_DEVICE_MEMORY, cycle 9); the screen says so.
+   */
+  fallbackReason: string | null;
 }
 
 export interface SeparationJob {
@@ -82,7 +87,7 @@ export function startSeparation(request: SeparationRequest, callbacks: Separatio
       )
       .then((r) => {
         if (r.fallbackReason) console.warn(r.fallbackReason);
-        resolve({ backend: r.backend, elapsedMs: r.elapsedMs });
+        resolve({ backend: r.backend, elapsedMs: r.elapsedMs, fallbackReason: r.fallbackReason ?? null });
       }, reject);
   }).finally(() => {
     finished = true;

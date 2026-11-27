@@ -5,7 +5,7 @@
 //
 // Runs only with MTS_PARITY=1 and when test/htdemucs_embedded.onnx and the song exist (never in CI; heavy):
 //   MTS_PARITY=1 npx playwright test tests/e2e/separation-parity.local.spec.ts --project=chromium
-// (add --headed for WebGPU: headless Chromium in the container only has SwiftShader, a fallback adapter.)
+// WebGPU: --use-angle=vulkan (below) gives headless Chromium the real GPU; without it the adapter is SwiftShader.
 // The reference must be separated from the app's own stored WAV: the browser's mp3 decode differs from the tool's
 // (only about 33 dB apart), which alone would cost the stems their 30 dB. Each run writes the app's clip to
 // test/stems-ref/no-60-30/app-input.wav; to make the reference from it (once):
@@ -37,7 +37,7 @@ const ready = process.env['MTS_PARITY'] === '1' && existsSync(SONG) && existsSyn
 
 test.describe.configure({ mode: 'serial' });
 test.skip(!ready, 'local parity check: set MTS_PARITY=1 with test/htdemucs_embedded.onnx and the song present');
-test.use({ launchOptions: { args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan'] }, trace: 'off' });
+test.use({ launchOptions: { args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-angle=vulkan'] }, trace: 'off' });
 test.setTimeout(30 * 60_000);
 
 function pcm16(buf: Buffer): [Float32Array, Float32Array] {
