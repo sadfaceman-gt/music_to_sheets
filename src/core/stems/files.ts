@@ -59,16 +59,23 @@ export function wavHeader(frames: number): Uint8Array<ArrayBuffer> {
   return new Uint8Array(buf);
 }
 
-/** Interleaves a stereo pair as 16-bit little-endian PCM, clipping to +-1 (for writing at sampleOffset). */
+/**
+ * Interleaves a stereo pair as 16-bit little-endian PCM, clipping to +-1 and rounding to the nearest step (the same
+ * scaling as src/storage/wav.ts encodeWav), for writing at sampleOffset. NaN is written as 0.
+ */
 export function encodePcm16(left: Float32Array, right: Float32Array): Uint8Array<ArrayBuffer> {
   const n = left.length;
   const buf = new ArrayBuffer(n * FRAME_BYTES);
   const v = new DataView(buf);
   for (let i = 0; i < n; i++) {
-    const l = Math.max(-1, Math.min(1, left[i]!));
-    const r = Math.max(-1, Math.min(1, right[i] ?? 0));
-    v.setInt16(i * 4, l < 0 ? l * 0x8000 : l * 0x7fff, true);
-    v.setInt16(i * 4 + 2, r < 0 ? r * 0x8000 : r * 0x7fff, true);
+    v.setInt16(i * 4, pcm16(left[i]!), true);
+    v.setInt16(i * 4 + 2, pcm16(right[i] ?? 0), true);
   }
   return new Uint8Array(buf);
+}
+
+function pcm16(x: number): number {
+  if (Number.isNaN(x)) return 0;
+  const c = Math.max(-1, Math.min(1, x));
+  return Math.round(c < 0 ? c * 0x8000 : c * 0x7fff);
 }
