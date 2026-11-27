@@ -353,7 +353,7 @@ test.describe('A B A B song', () => {
     await expect(page.getByTestId(`block-${c3.id}`)).toHaveText('N.C.');
 
     // Write chord name (always shown, T40): accepts D/F# for both selected blocks, refuses /F#d/Dmin2 and changes nothing.
-    await expect(page.getByTestId('write-chord-toggle')).toHaveCount(0);
+    await expect(page.getByTestId('write-chord-toggle')).toBeChecked();
     await page.getByTestId('chord-input').fill('D/F#');
     await page.getByTestId('chord-input').press('Enter');
     await expect(page.getByTestId(`block-${c3.id}`)).toHaveText('D/F♯');
@@ -458,6 +458,66 @@ test.describe('A B A B song', () => {
     expect((await ana.selection(page)).length).toBe(1);
     await page.keyboard.press('Escape');
     expect(await ana.selection(page)).toEqual([]);
+  });
+
+  test('T43: the Write chord name switch: off, a chord click only selects; the box still works; the choice survives a reload', async () => {
+    const tl = await reset();
+    const box = page.getByTestId('chord-input');
+    const toggle = page.getByTestId('write-chord-toggle');
+    const mid = (b: Block) => (b.start + b.end) / 2;
+    const [c5, c6] = [tl.chord[5]!, tl.chord[6]!];
+    await expect(toggle).toBeChecked();
+    await toggle.click();
+    await expect(toggle).not.toBeChecked();
+    expect(await page.evaluate(() => localStorage.getItem('mts.writeChordName'))).toBe('off');
+    try {
+
+      // A click selects the block and leaves the box alone; a double-click doesn't fill it.
+      await clickAt(CHORD_ROW, mid(c5));
+      expect(await ana.selection(page)).toEqual([c5.id]);
+      await expect(box).not.toBeFocused();
+      await expect(box).toBeEnabled();
+      const kept = await box.inputValue();
+      const p5 = await pt(CHORD_ROW, mid(c5));
+      await page.mouse.dblclick(p5.x, p5.y);
+      await expect(box).not.toBeFocused();
+      await expect(box).toHaveValue(kept);
+      // Tool letters reach the timeline (B: Split), and V goes back to Select.
+      await page.keyboard.press('b');
+      await expect(page.getByTestId('tool-split')).toHaveAttribute('aria-pressed', 'true');
+      await page.keyboard.press('v');
+      await expect(page.getByTestId('tool-select')).toHaveAttribute('aria-pressed', 'true');
+
+      // The box still names the selection when you click into it, and Space still plays from it.
+      await clickAt(CHORD_ROW, mid(c6));
+      await box.click();
+      // Clear what is left in the box (fill('') would press Delete, which deletes the block, T40).
+      await page.keyboard.press('ControlOrMeta+a');
+      await page.keyboard.press('Backspace');
+      await expect(box).toHaveValue('');
+      expect(await ana.selection(page)).toEqual([c6.id]);
+      await page.keyboard.type('Em');
+      await page.keyboard.press('Enter');
+      await expect(page.getByTestId(`block-${c6.id}`)).toHaveText('Em');
+      await page.keyboard.press(' ');
+      await expect.poll(async () => (await ana.playback(page)).playing).toBe(true);
+      await page.keyboard.press(' ');
+      await expect.poll(async () => (await ana.playback(page)).playing).toBe(false);
+      await expect(box).toHaveValue('');
+
+      // Off survives a reload; on again, a click focuses the box.
+      await page.reload();
+      await ana.waitDone(page);
+      await expect(page.getByTestId('write-chord-toggle')).not.toBeChecked();
+      await page.getByTestId('write-chord-toggle').click();
+      expect(await page.evaluate(() => localStorage.getItem('mts.writeChordName'))).toBe('on');
+      await clickAt(CHORD_ROW, mid(c5));
+      await expect(page.getByTestId('chord-input')).toBeFocused();
+      await page.keyboard.press('Escape');
+    } finally {
+      // Later tests expect the switch on.
+      if (!(await page.getByTestId('write-chord-toggle').isChecked())) await page.getByTestId('write-chord-toggle').click();
+    }
   });
 
   test('rebinding a tool key; Escape while binding removes it', async () => {

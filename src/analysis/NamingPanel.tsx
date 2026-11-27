@@ -1,7 +1,8 @@
 /**
  * The naming panel under the timeline tools (M2c cycle 7, Design 5.5), for a selection in one row: the section label
  * buttons, the Keys dropdown, or the chord dropdowns (choices chordProblem rejects are disabled), and the chord name box
- * (Write chord name, T40), always shown: a click on a chord block focuses and clears it, a double-click fills it.
+ * (T40), always shown. With the Write chord name switch on (T43), a click on a chord block focuses and clears the box
+ * and a double-click fills it; with it off, clicks only select.
  */
 import { useEffect, useRef, useState } from 'react';
 import { SECTION_LABELS } from '../core/analysis/types.ts';
@@ -30,6 +31,9 @@ interface Props {
   onName: (name: BlockName) => void;
   /** A request from the timeline to focus the chord box with this text (n counts requests; select selects the text). */
   boxRequest: ChordBoxRequest | null;
+  /** The Write chord name switch (T43): while on, chord-block clicks focus the box. The box shows either way. */
+  writeChord: boolean;
+  onWriteChord: (on: boolean) => void;
 }
 
 export interface ChordBoxRequest {
@@ -38,7 +42,7 @@ export interface ChordBoxRequest {
   select: boolean;
 }
 
-export function NamingPanel({ timeline, selection, onName, boxRequest }: Props) {
+export function NamingPanel({ timeline, selection, onName, boxRequest, writeChord, onWriteChord }: Props) {
   const row = selectionRow(timeline, selection);
   const first: Block | undefined = selection.map((id) => findBlock(timeline, id)).find((b): b is Block => !!b && b.row === row);
 
@@ -92,6 +96,10 @@ export function NamingPanel({ timeline, selection, onName, boxRequest }: Props) 
           </label>
         )}
         {row === 'chord' && <ChordDropdowns current={first?.row === 'chord' ? first.name : null} onChord={(c) => onName({ row: 'chord', name: c })} />}
+        <label className="ml-auto flex items-center gap-1" title="A click on a chord block puts you in the chord name box; a double-click fills it with the block's chord">
+          <input type="checkbox" role="switch" data-testid="write-chord-toggle" checked={writeChord} onChange={(e) => onWriteChord(e.target.checked)} />
+          Write chord name
+        </label>
       </div>
       <WriteChord enabled={row === 'chord'} request={boxRequest} onChord={(c) => onName({ row: 'chord', name: c })} />
     </section>

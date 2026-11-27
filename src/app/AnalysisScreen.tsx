@@ -31,6 +31,7 @@ import { TimelineToolbar } from '../analysis/TimelineToolbar.tsx';
 import { NamingPanel } from '../analysis/NamingPanel.tsx';
 import type { ChordBoxRequest } from '../analysis/NamingPanel.tsx';
 import { chordBoxRoute, isChordBox } from '../analysis/chordBoxKeys.ts';
+import { loadWriteChord, saveWriteChord } from '../analysis/writeChordPref.ts';
 import { keyLineFromBlocks, problemPlace, problemText, rerunMessage, unreviewedWarning } from '../analysis/timelineText.ts';
 import { loadTimelineBindings, RESERVED_TIMELINE_KEYS, saveTimelineBindings, toolOfBinding } from '../analysis/timelineTools.ts';
 import type { TimelineMode, TimelineToolId } from '../analysis/timelineTools.ts';
@@ -118,6 +119,15 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
   const [listeningId, setListeningId] = useState<string | null>(null);
   const [toolMessage, setToolMessage] = useState<string | null>(null);
   const [boxRequest, setBoxRequest] = useState<ChordBoxRequest | null>(null);
+  const [writeChord, setWriteChord] = useState(loadWriteChord);
+  const writeChordRef = useRef(writeChord);
+  useEffect(() => {
+    writeChordRef.current = writeChord;
+  }, [writeChord]);
+  const changeWriteChord = useCallback((on: boolean) => {
+    setWriteChord(on);
+    saveWriteChord(on);
+  }, []);
   const [finishView, setFinishView] = useState<FinishView>('none');
   const hoverRef = useRef<number | null>(null);
 
@@ -267,8 +277,9 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
     [commit],
   );
 
-  /** A click on a chord block focuses and clears the chord name box; a double-click fills it with the block's chord (T40). */
+  /** With Write chord name on, a click on a chord block focuses and clears the chord name box; a double-click fills it with the block's chord (T40, T43). */
   const chordClick = useCallback((b: Block, fill: boolean) => {
+    if (!writeChordRef.current) return;
     const text = fill && b.row === 'chord' && b.name ? formatChord(b.name) : '';
     setBoxRequest((r) => ({ n: (r?.n ?? 0) + 1, text, select: fill }));
   }, []);
@@ -861,7 +872,7 @@ export function AnalysisScreen({ store, projectId, notice, onAnalysed, onFinishe
                 onRedo={redo}
                 message={toolMessage}
               />
-              <NamingPanel timeline={timeline} selection={sel} onName={nameSelection} boxRequest={boxRequest} />
+              <NamingPanel timeline={timeline} selection={sel} onName={nameSelection} boxRequest={boxRequest} writeChord={writeChord} onWriteChord={changeWriteChord} />
             </>
           )}
 
