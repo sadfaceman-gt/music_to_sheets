@@ -1,13 +1,15 @@
 // The vendored processor (src/ml/demucs) against demucs-web 1.0.2 itself, on random input: same maths, so the
 // results agree to within 1e-5.
 import * as ref from 'demucs-web';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SEGMENT_SAMPLES, SEGMENT_STRIDE } from '../../../src/core/stems/types.ts';
 import { fft, ifft, istft, reflectPad, stft } from '../../../src/ml/demucs/fft.ts';
 import { MODEL_SPEC_BINS, MODEL_SPEC_FRAMES, prepareModelInput, runSegment, standaloneIspec, standaloneMask } from '../../../src/ml/demucs/processor.ts';
 import type { SegmentSession } from '../../../src/ml/demucs/processor.ts';
 
 const TOL = 1e-5;
+// Full-size segments take seconds each, more when the whole suite runs in parallel.
+vi.setConfig({ testTimeout: 60_000 });
 
 function rng(seed: number): () => number {
   let a = seed >>> 0;

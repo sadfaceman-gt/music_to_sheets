@@ -2,7 +2,7 @@
 // demucs-web's separate() over the same range, a run that crashes resumes from its tail and ends the same, and a
 // broken tail starts the range over.
 import * as ref from 'demucs-web';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { encodePcm16, sampleOffset, wavHeader } from '../../../src/core/stems/files.ts';
 import { pendingRange } from '../../../src/core/stems/ranges.ts';
 import { SEGMENT_SAMPLES, SEGMENT_STRIDE } from '../../../src/core/stems/types.ts';
@@ -13,6 +13,8 @@ import type { StemIo } from '../../../src/ml/demucs/separate.ts';
 import { encodeWav } from '../../../src/storage/wav.ts';
 
 const ORDER = ['drums', 'bass', 'other', 'vocals'] as const;
+// Three full-size segments per run: seconds, more when the whole suite runs in parallel.
+vi.setConfig({ testTimeout: 60_000 });
 
 /** Time output only: track t = (t + 1) * 0.2 * input, plus a ripple so the overlap-add matters. */
 function fakeSession(): SegmentSession & { runs: number } {
