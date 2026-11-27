@@ -12,6 +12,8 @@ export interface StemsRunInfo {
   firstProgress: SeparationProgress | null;
   progress: SeparationProgress | null;
   backend: 'webgpu' | 'wasm' | null;
+  /** Why the run moved from WebGPU to WASM (SeparationOutcome.fallbackReason), or null. */
+  fallback: string | null;
   error: string | null;
 }
 

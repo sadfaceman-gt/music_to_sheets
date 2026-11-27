@@ -50,7 +50,7 @@ const MIXER_SAVE_MS = 400; // facts-ok: debounce delay
 
 type Load = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready' };
 
-const idleRun = (): StemsRunInfo => ({ state: 'idle', started: [], saved: [], firstProgress: null, progress: null, backend: null, error: null });
+const idleRun = (): StemsRunInfo => ({ state: 'idle', started: [], saved: [], firstProgress: null, progress: null, backend: null, fallback: null, error: null });
 
 /** reconcileRanges, or null when it can't run (e.g. no scope yet). */
 function tryReconcile(stems: ProjectStems, scope: SeparationScope | null, durationSamples: number): Reconciled | null {
@@ -229,7 +229,7 @@ export function StemsScreen({ store, projectId, profile, onNavigate, onAnalysed,
       const outcome = await j.promise;
       putStems((s) => ({ ...s, backend: outcome.backend }));
       persist();
-      setRunInfo((x) => ({ ...x, state: 'done', backend: outcome.backend }));
+      setRunInfo((x) => ({ ...x, state: 'done', backend: outcome.backend, fallback: outcome.fallbackReason }));
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') setRunInfo((x) => ({ ...x, state: 'cancelled' }));
       else setRunInfo((x) => ({ ...x, state: 'error', error: e instanceof Error ? e.message : String(e) }));
@@ -436,6 +436,11 @@ export function StemsScreen({ store, projectId, profile, onNavigate, onAnalysed,
                 </span>
               )}
             </div>
+            {run.fallback && (
+              <p data-testid="stems-fallback" className="text-sm text-amber-400" title={run.fallback}>
+                WebGPU failed (the model needs more GPU memory than some cards have), so this run used WASM (CPU).
+              </p>
+            )}
             {running && (
               <div className="space-y-1">
                 <progress data-testid="stems-progress" className="h-2 w-full" value={pr?.fraction ?? 0} max={1} />
