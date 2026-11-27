@@ -4,7 +4,10 @@
  * restores it from the Actions cache); without the file the whole spec is skipped. Separation runs on WASM, few and
  * short: section A (0 to bar 2) scopes about 6 s (one segment), section B (bars 2 to 5) about 9.75 s (two segments).
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { expect, test } from '@playwright/test';
 import type { Browser, Page, Route } from '@playwright/test';
 import { ana, plan, stems } from './helpers.ts';
@@ -20,15 +23,55 @@ const MODEL_BYTES = 180534758;
 const URL_KEY = 'mts.test.demucsModelUrl';
 const hasModel = existsSync(MODEL_FILE);
 
-/** How the model route answers. */
+/**
+ * How the model is answered. A small local HTTP server streams the file (Range and CORS like huggingface.co): a
+ * Playwright route.fulfill would push 180 MB through the protocol and stall. The page.route on its URL logs each
+ * request and aborts it in 'fail' mode, else lets it through.
+ */
 interface ModelServer {
   mode: 'normal' | 'fail' | 'truncate-then-hold';
-  /** Bytes sent by the first (truncated) answer in 'truncate-then-hold'. */
+  /** Bytes sent by the first (short) answer in 'truncate-then-hold'. */
   truncateAt: number;
-  /** Requests seen: their Range header and the status sent (0 = aborted). */
+  /** Requests answered: their Range header and the status sent (0 = aborted or never answered). */
   log: { range: string | null; status: number }[];
-  /** Releases a held Range request (truncate-then-hold). */
-  release: (() => void) | null;
+  /** A Range request is being held (truncate-then-hold). */
+  holding: boolean;
+}
+
+const CORS = { 'access-control-allow-origin': '*', 'access-control-expose-headers': 'content-range, content-length, accept-ranges', 'cross-origin-resource-policy': 'cross-origin' };
+
+function modelServer(state: ModelServer): Server {
+  return createServer((req: IncomingMessage, res: ServerResponse) => {
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, { ...CORS, 'access-control-allow-headers': 'range', 'access-control-allow-methods': 'GET' }).end();
+      return;
+    }
+    const range = req.headers.range ?? null;
+    const m = range ? /bytes=(\d+)-/.exec(range) : null;
+    const from = m ? Number(m[1]) : 0;
+    if (state.mode === 'truncate-then-hold') {
+      if (from === 0) {
+        // A body that ends early, as when a connection drops: the loader goes on with a Range request.
+        state.log.push({ range, status: 200 });
+        res.writeHead(200, { ...CORS, 'content-type': 'application/octet-stream', 'content-length': String(state.truncateAt) });
+        createReadStream(MODEL_FILE, { start: 0, end: state.truncateAt - 1 }).pipe(res);
+        return;
+      }
+      // Hold the Range request until the page gives up on it (Pause).
+      state.holding = true;
+      req.on('close', () => {
+        state.holding = false;
+        state.log.push({ range, status: 0 });
+      });
+      return;
+    }
+    const status = from > 0 ? 206 : 200;
+    state.log.push({ range, status });
+    const headers: Record<string, string> = { ...CORS, 'content-type': 'application/octet-stream', 'accept-ranges': 'bytes', 'content-length': String(MODEL_BYTES - from) };
+    if (status === 206) headers['content-range'] = `bytes ${from}-${MODEL_BYTES - 1}/${MODEL_BYTES}`;
+    res.writeHead(status, headers);
+    createReadStream(MODEL_FILE, { start: from }).pipe(res);
+  });
 }
 
 test.describe('Stems step on a short song', () => {
@@ -40,38 +83,16 @@ test.describe('Stems step on a short song', () => {
   let tl: Timeline;
   /** Section block ids: A, B, C. */
   let S: number[];
-  let model: Buffer;
-  const server: ModelServer = { mode: 'normal', truncateAt: 40_000_000, log: [], release: null };
+  let http: Server | null = null;
+  const server: ModelServer = { mode: 'normal', truncateAt: 40_000_000, log: [], holding: false };
 
   async function serve(route: Route) {
-    const range = route.request().headers()['range'] ?? null;
-    if (server.mode === 'fail') {
-      server.log.push({ range, status: 0 });
+    if (route.request().method() === 'GET' && server.mode === 'fail') {
+      server.log.push({ range: route.request().headers()['range'] ?? null, status: 0 });
       await route.abort('failed');
       return;
     }
-    const m = range ? /bytes=(\d+)-/.exec(range) : null;
-    const from = m ? Number(m[1]) : 0;
-    if (server.mode === 'truncate-then-hold') {
-      if (from === 0) {
-        server.log.push({ range, status: 200 });
-        // A body that ends early, as when a connection drops: the loader goes on with a Range request.
-        await route.fulfill({ status: 200, body: model.subarray(0, server.truncateAt), headers: { 'content-type': 'application/octet-stream' } });
-        return;
-      }
-      if (server.release === null) {
-        // Hold the first Range request until the test pauses the download; it is then aborted by the page.
-        await new Promise<void>((resolve) => (server.release = resolve));
-        server.log.push({ range, status: 0 });
-        await route.abort('aborted').catch(() => undefined);
-        return;
-      }
-    }
-    const status = from > 0 ? 206 : 200;
-    server.log.push({ range, status });
-    const headers: Record<string, string> = { 'content-type': 'application/octet-stream', 'accept-ranges': 'bytes' };
-    if (status === 206) headers['content-range'] = `bytes ${from}-${MODEL_BYTES - 1}/${MODEL_BYTES}`;
-    await route.fulfill({ status, body: model.subarray(from), headers }).catch(() => undefined);
+    await route.continue();
   }
 
   const separateButton = () => page.getByTestId('stems-separate');
@@ -136,11 +157,13 @@ test.describe('Stems step on a short song', () => {
     }
   }
 
-  test.beforeAll(async ({ browser, baseURL }: { browser: Browser; baseURL?: string }, testInfo) => {
+  test.beforeAll(async ({ browser }: { browser: Browser }, testInfo) => {
     testInfo.setTimeout(180_000);
-    model = readFileSync(MODEL_FILE);
+    const srv = modelServer(server);
+    http = srv;
+    await new Promise<void>((resolve) => srv.listen(0, '127.0.0.1', resolve));
+    const url = `http://127.0.0.1:${(srv.address() as AddressInfo).port}/${MODEL_PATH}`;
     page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
-    const url = new URL(MODEL_PATH, baseURL).href;
     await page.addInitScript(
       ([key, u]) => {
         localStorage.setItem('mts.firstRunDone', 'yes');
@@ -184,6 +207,8 @@ test.describe('Stems step on a short song', () => {
   });
   test.afterAll(async () => {
     await page?.close();
+    http?.closeAllConnections();
+    await new Promise((resolve) => (http ? http.close(resolve) : resolve(undefined)));
   });
 
   test('Stems opens once the plan has a section; the route says so before', async () => {
@@ -216,15 +241,14 @@ test.describe('Stems step on a short song', () => {
     await expect(page.getByTestId('stems-separate')).toBeDisabled();
     server.mode = 'truncate-then-hold';
     server.log = [];
-    server.release = null;
     await page.getByTestId('model-download').click();
-    await expect(page.getByTestId('model-status')).toHaveText('Downloading: 40.0 MB of 180.5 MB', { timeout: 60_000 });
-    await expect(page.getByTestId('model-progress')).toHaveAttribute('value', String(server.truncateAt));
-    // The Range request is held; pause while it waits.
-    await expect.poll(() => server.release !== null, { timeout: 30_000 }).toBe(true);
+    // The Range request for the rest is held; pause while it waits.
+    await expect.poll(() => server.holding, { timeout: 60_000 }).toBe(true);
+    await expect(page.getByTestId('model-status')).toHaveText('Downloading: 40.0 MB of 180.5 MB');
+    await expect(page.getByTestId('model-progress')).toHaveJSProperty('value', server.truncateAt);
     await page.getByTestId('model-pause').click();
     await expect(page.getByTestId('model-status')).toHaveText('Paused: 40.0 MB of 180.5 MB');
-    server.release!();
+    await expect.poll(() => server.holding).toBe(false);
     server.mode = 'normal';
     await page.getByTestId('model-resume').click();
     await expect(page.getByTestId('model-status')).toHaveText('Model ready (180.5 MB, cached)', { timeout: 120_000 });
