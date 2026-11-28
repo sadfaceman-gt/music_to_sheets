@@ -63,7 +63,7 @@ export function MixerPanel({ mixer, roles, pieces, playing, position, onChannel,
       <table className="text-sm">
         <tbody>
           {CHANNEL_IDS.map((id) => {
-            const c = mixer[id];
+            const c = mixer[id] ?? { mute: false, solo: false, volume: 1 };
             const stem = id === 'original' ? null : id;
             return (
               <tr key={id} data-testid={`mixer-${id}`}>

@@ -7,18 +7,25 @@
  * needed; reconcileRanges keeps what is already separated with the same model and adds the rest.
  */
 
-/** The four HT-Demucs stems, in the order the UI lists them. */
-export const STEM_KINDS = ['vocals', 'drums', 'bass', 'other'] as const; // facts-ok: HT-Demucs stem names and arrangement roles, not game instruments
-export type StemKind = (typeof STEM_KINDS)[number];
+import type { StemModel } from './models.ts';
 
-/** The model's output track order (demucs-web CONSTANTS.TRACKS): drums, bass, other, vocals. */
+/**
+ * A stem's name, from its model's manifest (src/core/stems/models.ts): 'vocals', 'drums', 'bass', 'other' for
+ * HT-Demucs; plus 'guitar', 'piano' for HT-Demucs 6; anything for a Custom model (M3b cycle 10).
+ */
+export type StemKind = string;
+
+/** HT-Demucs's four stems in display order. Deprecated (M3b): use the model's manifest.stems and displayOrder. */
+export const STEM_KINDS: readonly StemKind[] = ['vocals', 'drums', 'bass', 'other']; // facts-ok: HT-Demucs stem names and arrangement roles, not game instruments
+
+/** HT-Demucs's output order (demucs-web CONSTANTS.TRACKS). Deprecated (M3b): use the model's manifest.stems. */
 export const MODEL_TRACK_ORDER: readonly StemKind[] = ['drums', 'bass', 'other', 'vocals']; // facts-ok: HT-Demucs stem names and arrangement roles, not game instruments
 
 /** A stem's part in the arrangement (Design 4, Stems), stored for M4. */
 export const STEM_ROLES = ['lead', 'counterMelody', 'harmony', 'bass', 'drums', 'ignore'] as const; // facts-ok: HT-Demucs stem names and arrangement roles, not game instruments
 export type StemRole = (typeof STEM_ROLES)[number];
 
-/** The role a stem starts with. */
+/** HT-Demucs's starting roles. Deprecated (M3b): use defaultRole(stem) in models.ts. */
 export const DEFAULT_ROLES: Readonly<Record<StemKind, StemRole>> = { vocals: 'lead', drums: 'drums', bass: 'bass', other: 'harmony' }; // facts-ok: HT-Demucs stem names and arrangement roles, not game instruments
 
 /** One stem's mixer channel; the original mix has one too. */
@@ -29,6 +36,7 @@ export interface MixerChannel {
   volume: number;
 }
 
+/** A stem name, or the original mix. */
 export type MixerChannelId = StemKind | 'original';
 
 /** Where a range stands. 'partial' = some segments saved (a cancelled or crashed run resumes from segmentsDone). */
@@ -48,13 +56,17 @@ export interface StemRange {
   status: RangeStatus;
 }
 
-/** A project's stems (schema v6). */
+/** A project's stems (schema v7; v6 had no `model` and HT-Demucs's four stems). */
 export interface ProjectStems {
+  /** The chosen model (HT-Demucs by default). Switching model clears the ranges (switchModel in ranges.ts). */
+  model: StemModel;
   /** SHA-256 of the model the ranges were separated with; null before any run. A different model makes them stale. */
   modelSha256: string | null;
   ranges: StemRange[];
   nextRangeId: number;
+  /** One role per stem of `model` (manifest.stems). */
   roles: Record<StemKind, StemRole>;
+  /** 'original' plus one channel per stem of `model`. */
   mixer: Record<MixerChannelId, MixerChannel>;
   /** Where the last run ran (shown on the screen); null before any run. */
   backend: 'webgpu' | 'wasm' | null;
@@ -78,7 +90,7 @@ export interface Segment {
   length: number;
 }
 
-/** A segment's separated output, already cut to segment.length: [stem in MODEL_TRACK_ORDER][channel 0 left, 1 right]. */
+/** A segment's separated output, already cut to segment.length: [stem in the model's manifest.stems order][channel 0 left, 1 right]. */
 export type SegmentOutput = Float32Array[][];
 
 /**
@@ -87,7 +99,7 @@ export type SegmentOutput = Float32Array[][];
  */
 export interface OverlapTail {
   start: number;
-  /** [stem in MODEL_TRACK_ORDER][channel] weighted sums, each of the same length as `weights`. */
+  /** [stem in the model's manifest.stems order][channel] weighted sums, each of the same length as `weights`. */
   sums: Float32Array[][];
   weights: Float32Array;
 }
@@ -96,7 +108,7 @@ export interface OverlapTail {
 export interface AccumulateResult {
   /** Offset in the range of `final`'s first sample. */
   finalStart: number;
-  /** [stem in MODEL_TRACK_ORDER][channel] final (divided by the weights) samples; may be empty arrays. */
+  /** [stem in the model's manifest.stems order][channel] final (divided by the weights) samples; may be empty arrays. */
   final: Float32Array[][];
   /** null after the last segment (everything is final). */
   tail: OverlapTail | null;

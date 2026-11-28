@@ -8,6 +8,8 @@ import { z } from 'zod';
 import { emptyPlan } from '../plan/types.ts';
 import { emptyStems } from '../stems/ranges.ts';
 import { STEM_ROLES } from '../stems/types.ts';
+import { BUILT_IN_MODELS, MODEL_KINDS, stemModelOf } from '../stems/models.ts';
+import type { ModelKind } from '../stems/models.ts';
 import type { ProjectStems, StemRole } from '../stems/types.ts';
 import { ANALYSIS_VERSION, DEFAULT_TRACKER } from '../analysis/types.ts';
 import { SECTION_LABELS } from '../analysis/types.ts';
@@ -25,10 +27,12 @@ import type { ColumnsPerBeat, Plan } from '../plan/types.ts';
  * 5 (M2d cycle 8, Design 6): the section plan (`plan`), the user's columns per beat (`columnsPerBeat`, T32; null until
  *   chosen), and `finishedOnce` (Finish analysis has passed at least once: the Plan step opens, and shows a stale
  *   notice while `finishedAt` is null).
+ * 7 (M3b cycle 10, Design 7.3): stems belong to one model (`stems.model`: id, SHA-256, size, manifest with the stem
+ *   names); roles and mixer channels are keyed by stem name. A v6 project migrates as HT-Demucs with its stems.
  * 6 (M3a cycle 9, Design 7, 13.1): the separated stems (`stems`: model SHA-256, ranges with their segment progress,
  *   roles, mixer). A v5 project migrates with no stems.
  */
-export const PROJECT_SCHEMA_VERSION = 6;
+export const PROJECT_SCHEMA_VERSION = 7;
 
 /** Longest song the app imports (Design 5.1, a memory guard). */
 export const MAX_SONG_SECONDS = 15 * 60;
@@ -147,7 +151,24 @@ const roleSchema = z.enum(STEM_ROLES as unknown as [StemRole, ...StemRole[]]);
 const mixerChannelSchema = z.object({ mute: z.boolean(), solo: z.boolean(), volume: z.number().min(0).max(1) });
 
 /** The separated stems (Design 7, src/core/stems/types.ts). */
+const stemNameSchema = z.string().regex(/^[a-z][a-z0-9-]{0,23}$/);
+
+/** A model's manifest (src/core/stems/models.ts). */
+export const manifestSchema = z.object({
+  name: z.string().min(1),
+  kind: z.enum(MODEL_KINDS as unknown as [ModelKind, ...ModelKind[]]),
+  stems: z.array(stemNameSchema).min(1),
+  sampleRate: z.number().int().positive(),
+  segmentSamples: z.number().int().positive(),
+});
+
 export const stemsSchema = z.object({
+  model: z.object({
+    id: z.enum(['htdemucs', 'htdemucs6', 'custom']),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    bytes: z.number().int().positive(),
+    manifest: manifestSchema,
+  }),
   modelSha256: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
   ranges: z.array(
     z.object({
@@ -160,8 +181,8 @@ export const stemsSchema = z.object({
     }),
   ),
   nextRangeId: z.number().int().positive(),
-  roles: z.object({ vocals: roleSchema, drums: roleSchema, bass: roleSchema, other: roleSchema }),
-  mixer: z.object({ original: mixerChannelSchema, vocals: mixerChannelSchema, drums: mixerChannelSchema, bass: mixerChannelSchema, other: mixerChannelSchema }),
+  roles: z.record(stemNameSchema, roleSchema),
+  mixer: z.record(z.string(), mixerChannelSchema),
   backend: z.enum(['webgpu', 'wasm']).nullable(),
 }) satisfies z.ZodType<ProjectStems>;
 
@@ -316,6 +337,12 @@ export function migrateProjectV5(raw: Record<string, unknown>): Record<string, u
   return { ...raw, schemaVersion: 6, stems: emptyStems() };
 }
 
+/** v6 -> v7 (Design 7.3): the stems were made with HT-Demucs; roles and mixer keep their (HT-Demucs) keys. */
+export function migrateProjectV6(raw: Record<string, unknown>): Record<string, unknown> {
+  const stems = (raw.stems ?? {}) as Record<string, unknown>;
+  return { ...raw, schemaVersion: 7, stems: { ...stems, model: stemModelOf(BUILT_IN_MODELS.htdemucs) } };
+}
+
 /** Validates a stored record, migrating older schema versions first. Throws a ZodError when invalid. */
 export function parseProject(raw: unknown): Project {
   let r = raw as Record<string, unknown> | null;
@@ -324,6 +351,7 @@ export function parseProject(raw: unknown): Project {
   if (r && typeof r === 'object' && r.schemaVersion === 3) r = migrateProjectV3(r);
   if (r && typeof r === 'object' && r.schemaVersion === 4) r = migrateProjectV4(r);
   if (r && typeof r === 'object' && r.schemaVersion === 5) r = migrateProjectV5(r);
+  if (r && typeof r === 'object' && r.schemaVersion === 6) r = migrateProjectV6(r);
   return projectSchema.parse(r);
 }
 

@@ -300,7 +300,7 @@ export function StemsScreen({ store, projectId, profile, onNavigate, onAnalysed,
 
   const onChannel = useCallback(
     (id: MixerChannelId, patch: Partial<MixerChannel>) => {
-      const p = putStems((s) => ({ ...s, mixer: { ...s.mixer, [id]: { ...s.mixer[id], ...patch } } }));
+      const p = putStems((s) => ({ ...s, mixer: { ...s.mixer, [id]: { mute: false, solo: false, volume: 1, ...s.mixer[id], ...patch } } }));
       if (p) engine.current?.setGains(appliedGains(p.stems.mixer));
       persistSoon();
     },

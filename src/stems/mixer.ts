@@ -17,10 +17,10 @@ export const CHANNEL_IDS: readonly MixerChannelId[] = ['original', ...STEM_KINDS
  * The gain each channel gets: mute wins; when any channel is soloed only the soloed ones sound; else the volume.
  */
 export function appliedGains(mixer: Readonly<Record<MixerChannelId, MixerChannel>>): Record<MixerChannelId, number> {
-  const anySolo = CHANNEL_IDS.some((id) => mixer[id].solo);
+  const anySolo = CHANNEL_IDS.some((id) => mixer[id]?.solo === true);
   const out = {} as Record<MixerChannelId, number>;
   for (const id of CHANNEL_IDS) {
-    const c = mixer[id];
+    const c = mixer[id] ?? { mute: false, solo: false, volume: 1 };
     out[id] = c.mute || (anySolo && !c.solo) ? 0 : c.volume;
   }
   return out;
@@ -119,7 +119,7 @@ export class MixerEngine {
       this.ctx = new AudioContext();
       for (const id of CHANNEL_IDS) {
         const g = this.ctx.createGain();
-        g.gain.value = this.target[id];
+        g.gain.value = this.target[id] ?? 1;
         g.connect(this.ctx.destination);
         this.gains.set(id, g);
       }
@@ -132,7 +132,7 @@ export class MixerEngine {
     this.target = { ...gains };
     for (const id of CHANNEL_IDS) {
       const g = this.gains.get(id);
-      if (g) g.gain.value = gains[id];
+      if (g) g.gain.value = gains[id] ?? 1;
     }
   }
 

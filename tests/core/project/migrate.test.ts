@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_TRACKER } from '../../../src/core/analysis/types.ts';
 import { emptyTrackers, parseProject, PROJECT_SCHEMA_VERSION } from '../../../src/core/project/schema.ts';
 import { emptyStems } from '../../../src/core/stems/ranges.ts';
+import { BUILT_IN_MODELS, stemModelOf } from '../../../src/core/stems/models.ts';
 
 const SHA = 'a'.repeat(64);
 const corrections = [{ kind: 'double' }, { kind: 'nudge', ms: 10 }];
@@ -133,6 +134,19 @@ describe('parseProject migration', () => {
     expect(p.stems).toEqual(emptyStems());
     expect(p.stems.roles).toEqual({ vocals: 'lead', drums: 'drums', bass: 'bass', other: 'harmony' });
     expect(p.columnsPerBeat).toBe(4);
+  });
+
+  it('migrates a v6 record to v7 as HT-Demucs, keeping its ranges, roles and mixer', () => {
+    const base = parseProject(v1Record());
+    const range = { id: 3, startSample: 0, lengthSamples: 441000, segmentsTotal: 2, segmentsDone: 2, status: 'done' };
+    const v6Stems: Record<string, unknown> = { ...base.stems, ranges: [range], nextRangeId: 4, roles: { ...base.stems.roles, other: 'ignore' } };
+    delete v6Stems.model;
+    const p = parseProject({ ...base, schemaVersion: 6, stems: v6Stems });
+    expect(p.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(p.stems.model).toEqual(stemModelOf(BUILT_IN_MODELS.htdemucs));
+    expect(p.stems.ranges).toEqual([range]);
+    expect(p.stems.roles['other']).toBe('ignore');
+    expect(Object.keys(p.stems.mixer).sort()).toEqual(['bass', 'drums', 'original', 'other', 'vocals']);
   });
 
   it('refuses a stem range with a bad status or a negative start', () => {

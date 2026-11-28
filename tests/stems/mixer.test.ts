@@ -5,17 +5,17 @@ import { appliedGains, fractionToSong, piecesInSeconds, piecesLength, playSchedu
 describe('mixer gains', () => {
   it('uses the volumes when nothing is muted or soloed', () => {
     const m = emptyStems().mixer;
-    m.drums.volume = 0.5;
+    m.drums!.volume = 0.5;
     expect(appliedGains(m)).toEqual({ original: 1, vocals: 1, drums: 0.5, bass: 1, other: 1 });
   });
 
   it('sounds only the soloed channels when any is soloed; mute wins over solo', () => {
     const m = emptyStems().mixer;
-    m.vocals.solo = true;
-    m.vocals.volume = 0.8;
-    m.bass.solo = true;
-    m.bass.mute = true;
-    m.original.mute = true;
+    m.vocals!.solo = true;
+    m.vocals!.volume = 0.8;
+    m.bass!.solo = true;
+    m.bass!.mute = true;
+    m.original!.mute = true;
     expect(appliedGains(m)).toEqual({ original: 0, vocals: 0.8, drums: 0, bass: 0, other: 0 });
   });
 });

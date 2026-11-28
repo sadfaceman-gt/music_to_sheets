@@ -13,8 +13,10 @@
  *   holds it; where two ranges overlap, the switch is at the middle of the overlap.
  */
 import { segmentPlan } from './segments.ts';
-import { DEFAULT_ROLES, STEM_SAMPLE_RATE } from './types.ts';
-import type { MixerChannel, MixerChannelId, ProjectStems, StemRange } from './types.ts';
+import { BUILT_IN_MODELS, defaultRole, stemModelOf } from './models.ts';
+import type { StemModel } from './models.ts';
+import { STEM_SAMPLE_RATE } from './types.ts';
+import type { MixerChannel, MixerChannelId, ProjectStems, StemRange, StemRole } from './types.ts';
 
 /** Seconds of context a new range takes from its separated neighbours (the scope's own margin, Design 6). */
 export const CONTEXT_SECONDS = 2;
@@ -28,10 +30,34 @@ export interface SampleSpan {
 
 const channel = (): MixerChannel => ({ mute: false, solo: false, volume: 1 });
 
-/** No stems yet: default roles, every mixer channel at full volume, nothing muted or soloed. */
-export function emptyStems(): ProjectStems {
-  const mixer = { original: channel(), vocals: channel(), drums: channel(), bass: channel(), other: channel() } satisfies Record<MixerChannelId, MixerChannel>;
-  return { modelSha256: null, ranges: [], nextRangeId: 1, roles: { ...DEFAULT_ROLES }, mixer, backend: null };
+/** No stems yet for `model` (default HT-Demucs): default roles, every mixer channel at full volume, nothing muted or soloed. */
+export function emptyStems(model: StemModel = BUILT_IN_MODELS.htdemucs): ProjectStems {
+  const stems = model.manifest.stems;
+  const mixer: Record<MixerChannelId, MixerChannel> = { original: channel() };
+  const roles: Record<string, StemRole> = {};
+  for (const s of stems) {
+    mixer[s] = channel();
+    roles[s] = defaultRole(s);
+  }
+  return { model: stemModelOf(model), modelSha256: null, ranges: [], nextRangeId: 1, roles, mixer, backend: null };
+}
+
+/**
+ * Switching to another model (Design 7.3, decided 2026-11-28): every range is dropped (the caller deletes their
+ * files after the user confirmed the warning), roles and mixer channels start fresh for the new model's stems
+ * (the original's channel is kept). nextRangeId keeps counting so file names never repeat. Inputs are not mutated.
+ * First version (contract): 10-core checks and tests it.
+ */
+export function switchModel(stems: ProjectStems, model: StemModel): { stems: ProjectStems; dropped: StemRange[] } {
+  const fresh = emptyStems(model);
+  fresh.mixer['original'] = { ...(stems.mixer['original'] ?? fresh.mixer['original']!) };
+  return { stems: { ...fresh, nextRangeId: stems.nextRangeId }, dropped: stems.ranges.map((r) => ({ ...r })) };
+}
+
+/** Bytes the separated stems take in OPFS (WAVs of saved segments' ranges, all stems): what a switch frees. */
+export function storedStemBytes(stems: ProjectStems): number {
+  const n = stems.model.manifest.stems.length;
+  return stems.ranges.filter((r) => r.status !== 'pending').reduce((sum, r) => sum + n * (44 + 4 * r.lengthSamples), 0); // facts-ok: WAV header and frame bytes
 }
 
 /** Seconds to samples at 44.1 kHz, rounded, inside [0, durationSamples]. */
