@@ -47,6 +47,20 @@ jobs:
           pulseaudio --start --exit-idle-time=-1
           pactl load-module module-null-sink sink_name=ci_null
           pactl set-default-sink ci_null
+      # The HT-Demucs model for the stems e2e (180.5 MB), downloaded once and kept in the Actions cache; the spec serves
+      # it to the browser through a Playwright route.
+      - name: Restore the HT-Demucs model
+        id: demucs-model
+        uses: actions/cache@v4
+        with:
+          path: test/htdemucs_embedded.onnx
+          key: demucs-e5e425c1
+      - name: Download the HT-Demucs model
+        if: steps.demucs-model.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p test
+          curl -L --fail --retry 3 -o test/htdemucs_embedded.onnx https://huggingface.co/timcsy/demucs-web-onnx/resolve/main/htdemucs_embedded.onnx
+          echo "e5e425c17683f163a472462eb5f5a4ffcd11c31858d57fbd0833b012d8b88077  test/htdemucs_embedded.onnx" | sha256sum -c -
       - run: npm run e2e
       - uses: actions/upload-artifact@v7
         if: failure()

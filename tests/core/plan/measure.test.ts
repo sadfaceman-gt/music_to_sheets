@@ -308,6 +308,33 @@ describe('separationScope', () => {
     expect(r.ranges).toEqual([{ start: 5, end: 11 }]);
   });
 
+  it('leaves out repeat instances (cycle 9): only the first of a repeated pair is sent', () => {
+    // Section 2 plays twice back to back, the second as a repeat; section 1 (0-10) is not in the plan.
+    const t = timeline([sec(1, 0, 10), sec(2, 40, 50), sec(3, 60, 70)]);
+    const c = ctxOf(t, G, 100);
+    const withRepeat = separationScope(planOf([2, 2, 3], null, [{}, { repeatOfPrevious: true }]), c);
+    expect(withRepeat.ranges).toEqual([
+      { start: 38, end: 52 },
+      { start: 58, end: 72 },
+    ]);
+    // A repeat of a section that plays nowhere else sends nothing for it.
+    const only = separationScope(planOf([3, 1, 1], null, [{}, {}, { repeatOfPrevious: true }]), c);
+    expect(only.ranges).toEqual([
+      { start: 0, end: 12 },
+      { start: 58, end: 72 },
+    ]);
+  });
+
+  it('a stored repeat that no longer holds counts as a normal instance', () => {
+    const t = timeline([sec(1, 0, 10, 'verse'), sec(2, 40, 50, 'chorus')]);
+    // Instance 2 says it repeats instance 1, but they are different blocks with different names: measured repeat is false.
+    const r = separationScope(planOf([1, 2], null, [{}, { repeatOfPrevious: true }]), ctxOf(t, G, 100));
+    expect(r.ranges).toEqual([
+      { start: 0, end: 12 },
+      { start: 38, end: 52 },
+    ]);
+  });
+
   it('an empty plan sends nothing', () => {
     expect(separationScope(planOf([]), ctx)).toEqual({ ranges: [], totalSec: 0 });
   });

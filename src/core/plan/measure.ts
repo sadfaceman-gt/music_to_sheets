@@ -216,12 +216,16 @@ export function fitHelpers(plan: Plan, ctx: PlanContext): FitSuggestion[] {
   return out;
 }
 
-/** The planned sections' audio plus the margin either side, merged (touching ranges too), inside [0, durationSec]. */
+/**
+ * The planned sections' audio plus the margin either side, merged (touching ranges too), inside [0, durationSec].
+ * Repeat instances are left out (decided 2026-11-27, Design 6): they play the same stretch of sheet music as the
+ * instance before. `repeat` is the measured flag, so a stored repeat that no longer holds counts as a normal instance.
+ */
 export function separationScope(plan: Plan, ctx: PlanContext, marginSec = SEPARATION_MARGIN_SEC): SeparationScope {
   const m = measurePlan(plan, ctx);
   const raw: TimeRange[] = [];
   for (const i of m.instances) {
-    if (!i.present || i.start === null || i.end === null) continue;
+    if (!i.present || i.repeat || i.start === null || i.end === null) continue;
     const start = Math.max(0, i.start - marginSec);
     const end = Math.min(ctx.durationSec, i.end + marginSec);
     if (end > start) raw.push({ start, end });

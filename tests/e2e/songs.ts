@@ -129,5 +129,7 @@ export const songAbab = (): UploadFile => ({ name: 'abab.wav', mimeType: 'audio/
 export const song44 = (): UploadFile => ({ name: 'song44.wav', mimeType: 'audio/wav', buffer: makeSong({ bpm: 120, beatsPerBar: 4, seconds: 20 }) });
 /** 20 s at 100 BPM in 3/4. */
 export const song34 = (): UploadFile => ({ name: 'song34.wav', mimeType: 'audio/wav', buffer: makeSong({ bpm: 100, beatsPerBar: 3, seconds: 20 }) });
+/** 12 s at 120 BPM in 4/4 (six 2 s bars from 0.25 s): short enough to separate on WASM in the stems e2e (M3a). */
+export const songShort = (): UploadFile => ({ name: 'short.wav', mimeType: 'audio/wav', buffer: makeSong({ bpm: 120, beatsPerBar: 4, seconds: 12 }) });
 /** Ten bytes that are not audio, named like an MP3. */
 export const badMp3 = (): UploadFile => ({ name: 'bad.mp3', mimeType: 'audio/mpeg', buffer: Buffer.from('0123456789') });

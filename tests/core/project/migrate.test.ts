@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_TRACKER } from '../../../src/core/analysis/types.ts';
 import { emptyTrackers, parseProject, PROJECT_SCHEMA_VERSION } from '../../../src/core/project/schema.ts';
+import { emptyStems } from '../../../src/core/stems/ranges.ts';
 
 const SHA = 'a'.repeat(64);
 const corrections = [{ kind: 'double' }, { kind: 'nudge', ms: 10 }];
@@ -122,6 +123,24 @@ describe('parseProject migration', () => {
     expect(done.finishedOnce).toBe(true);
     expect(done.finishedAt).toBe(7);
     expect(parseProject(v4(null)).finishedOnce).toBe(false);
+  });
+
+  it('migrates a v5 record to v6 with no stems (default roles, mixer at full volume), keeping its plan', () => {
+    const r: Record<string, unknown> = { ...parseProject(v1Record()), schemaVersion: 5, columnsPerBeat: 4 };
+    delete r.stems;
+    const p = parseProject(r);
+    expect(p.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
+    expect(p.stems).toEqual(emptyStems());
+    expect(p.stems.roles).toEqual({ vocals: 'lead', drums: 'drums', bass: 'bass', other: 'harmony' });
+    expect(p.columnsPerBeat).toBe(4);
+  });
+
+  it('refuses a stem range with a bad status or a negative start', () => {
+    const base = parseProject(v1Record());
+    const range = { id: 1, startSample: 0, lengthSamples: 441000, segmentsTotal: 2, segmentsDone: 1, status: 'partial' };
+    expect(parseProject({ ...base, stems: { ...base.stems, ranges: [range] } }).stems.ranges).toEqual([range]);
+    expect(() => parseProject({ ...base, stems: { ...base.stems, ranges: [{ ...range, status: 'running' }] } })).toThrow();
+    expect(() => parseProject({ ...base, stems: { ...base.stems, ranges: [{ ...range, startSample: -1 }] } })).toThrow();
   });
 
   it('keeps a v5 plan and columns per beat as stored, and refuses a bad columns per beat', () => {

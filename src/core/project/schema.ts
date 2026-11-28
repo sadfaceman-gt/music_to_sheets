@@ -6,6 +6,9 @@
  */
 import { z } from 'zod';
 import { emptyPlan } from '../plan/types.ts';
+import { emptyStems } from '../stems/ranges.ts';
+import { STEM_ROLES } from '../stems/types.ts';
+import type { ProjectStems, StemRole } from '../stems/types.ts';
 import { ANALYSIS_VERSION, DEFAULT_TRACKER } from '../analysis/types.ts';
 import { SECTION_LABELS } from '../analysis/types.ts';
 import type { BeatTracker, SectionLabel } from '../analysis/types.ts';
@@ -22,8 +25,10 @@ import type { ColumnsPerBeat, Plan } from '../plan/types.ts';
  * 5 (M2d cycle 8, Design 6): the section plan (`plan`), the user's columns per beat (`columnsPerBeat`, T32; null until
  *   chosen), and `finishedOnce` (Finish analysis has passed at least once: the Plan step opens, and shows a stale
  *   notice while `finishedAt` is null).
+ * 6 (M3a cycle 9, Design 7, 13.1): the separated stems (`stems`: model SHA-256, ranges with their segment progress,
+ *   roles, mixer). A v5 project migrates with no stems.
  */
-export const PROJECT_SCHEMA_VERSION = 5;
+export const PROJECT_SCHEMA_VERSION = 6;
 
 /** Longest song the app imports (Design 5.1, a memory guard). */
 export const MAX_SONG_SECONDS = 15 * 60;
@@ -138,6 +143,28 @@ export const planSchema = z.object({
   nextId: z.number().int().positive(),
 }) satisfies z.ZodType<Plan>;
 
+const roleSchema = z.enum(STEM_ROLES as unknown as [StemRole, ...StemRole[]]);
+const mixerChannelSchema = z.object({ mute: z.boolean(), solo: z.boolean(), volume: z.number().min(0).max(1) });
+
+/** The separated stems (Design 7, src/core/stems/types.ts). */
+export const stemsSchema = z.object({
+  modelSha256: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+  ranges: z.array(
+    z.object({
+      id: z.number().int().positive(),
+      startSample: z.number().int().nonnegative(),
+      lengthSamples: z.number().int().positive(),
+      segmentsTotal: z.number().int().positive(),
+      segmentsDone: z.number().int().nonnegative(),
+      status: z.enum(['pending', 'partial', 'done']),
+    }),
+  ),
+  nextRangeId: z.number().int().positive(),
+  roles: z.object({ vocals: roleSchema, drums: roleSchema, bass: roleSchema, other: roleSchema }),
+  mixer: z.object({ original: mixerChannelSchema, vocals: mixerChannelSchema, drums: mixerChannelSchema, bass: mixerChannelSchema, other: mixerChannelSchema }),
+  backend: z.enum(['webgpu', 'wasm']).nullable(),
+}) satisfies z.ZodType<ProjectStems>;
+
 const keyPickSchema = z.object({ tonic: pitchClassSchema, mode: z.enum(['major', 'minor']) });
 
 export const sourceSchema = z.object({
@@ -192,6 +219,8 @@ export const projectSchema = z.object({
   plan: planSchema,
   /** The user's columns per beat (T32, Design 9.1), shared by the Plan step and Column clicks; null until chosen. */
   columnsPerBeat: columnsPerBeatSchema.nullable(),
+  /** The separated stems (Design 7); emptyStems() for a new project. */
+  stems: stemsSchema,
 });
 
 export type Project = z.infer<typeof projectSchema>;
@@ -282,6 +311,11 @@ export function migrateProjectV4(raw: Record<string, unknown>): Record<string, u
   return { ...raw, schemaVersion: 5, finishedOnce: raw.finishedAt !== null && raw.finishedAt !== undefined, plan: emptyPlan(), columnsPerBeat: null };
 }
 
+/** v5 -> v6 (Design 7): no stems yet. */
+export function migrateProjectV5(raw: Record<string, unknown>): Record<string, unknown> {
+  return { ...raw, schemaVersion: 6, stems: emptyStems() };
+}
+
 /** Validates a stored record, migrating older schema versions first. Throws a ZodError when invalid. */
 export function parseProject(raw: unknown): Project {
   let r = raw as Record<string, unknown> | null;
@@ -289,6 +323,7 @@ export function parseProject(raw: unknown): Project {
   if (r && typeof r === 'object' && r.schemaVersion === 2) r = migrateProjectV2(r);
   if (r && typeof r === 'object' && r.schemaVersion === 3) r = migrateProjectV3(r);
   if (r && typeof r === 'object' && r.schemaVersion === 4) r = migrateProjectV4(r);
+  if (r && typeof r === 'object' && r.schemaVersion === 5) r = migrateProjectV5(r);
   return projectSchema.parse(r);
 }
 

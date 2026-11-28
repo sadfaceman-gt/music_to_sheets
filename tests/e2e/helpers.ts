@@ -4,6 +4,7 @@ import type { Page } from '@playwright/test';
 import type { Timeline } from '../../src/core/timeline/types.ts';
 import type { Plan } from '../../src/core/plan/types.ts';
 import type { MtsPlanHook } from '../../src/plan/testHook.d.ts';
+import type { MtsStemsHook } from '../../src/stems/testHook.d.ts';
 
 export type SpanLike<T> = { start: number; end: number; startBeat: number; endBeat: number } & T;
 export type SectionLike = SpanLike<{ label: string; confidence: number; cluster: number }>;
@@ -49,6 +50,7 @@ export interface MtsHooks {
     xToTime(px: number): number;
   };
   __mtsPlan?: MtsPlanHook;
+  __mtsStems?: MtsStemsHook;
   __mtsView?: { cellToClient(c: number, r: number): { x: number; y: number }; getViewport(): { cellSize: number; scrollCol: number } };
 }
 
@@ -178,6 +180,30 @@ export const plan = {
       const h = (globalThis as unknown as MtsHooks).__mtsPlan;
       try {
         return h !== undefined && h.getMeasure() !== undefined && h.getMeasure() !== null;
+      } catch {
+        return false;
+      }
+    });
+  },
+};
+
+/** Reads of the Stems step's test hook (each evaluate body must be self-contained). */
+export const stems = {
+  get: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsStems!.getStems()),
+  scope: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsStems!.getScope()),
+  run: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsStems!.getRun()),
+  mixer: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsStems!.getMixer()),
+  pieces: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsStems!.getPieces()),
+  modelState: (page: Page) => page.evaluate(() => (globalThis as unknown as MtsHooks).__mtsStems!.getModelState()),
+  setBackend: (page: Page, b: 'webgpu' | 'wasm' | null) => page.evaluate((x) => (globalThis as unknown as MtsHooks).__mtsStems!.setBackend(x), b),
+  setModelUrl: (page: Page, url: string | null) => page.evaluate((x) => (globalThis as unknown as MtsHooks).__mtsStems!.setModelUrl(x), url),
+  /** Waits until the Stems step has loaded its project. */
+  async waitReady(page: Page) {
+    await page.getByTestId('stems-screen').waitFor();
+    await page.waitForFunction(() => {
+      const h = (globalThis as unknown as MtsHooks).__mtsStems;
+      try {
+        return h !== undefined && h.getStems() !== undefined;
       } catch {
         return false;
       }

@@ -13,10 +13,12 @@ import { decodeSong, ImportError } from '../audio/decode.ts';
 import type { DecodedSong } from '../audio/decode.ts';
 import * as opfs from '../audio/opfs.ts';
 import { emptyPlan } from '../core/plan/types.ts';
+import { emptyStems } from '../core/stems/ranges.ts';
 import { sharedDb } from './db.ts';
 import type { MtsDb } from './db.ts';
 import { sha256Hex } from './hash.ts';
 import { encodeWav } from './wav.ts';
+import { deleteProjectStems } from './stems.ts';
 
 export { createAutosave } from './autosave.ts';
 export type { Autosave } from './autosave.ts';
@@ -58,7 +60,7 @@ export interface ProjectStore {
   save(project: Project): Promise<void>;
   /** Marks the project opened now (meta.lastOpenedAt) and returns it. */
   open(id: string): Promise<Project | null>;
-  /** Deletes the project, its artifacts, and its OPFS files unless another project uses the same source. */
+  /** Deletes the project, its artifacts, its stem files, and its source files unless another project uses the same source. */
   delete(id: string): Promise<void>;
   getPeaks(project: Project): Promise<WaveformPeaks | null>;
   getAnalysis(key: string): Promise<Analysis | null>;
@@ -81,6 +83,8 @@ export interface StoreDeps {
   persist: () => void;
   estimate: () => Promise<{ usage?: number; quota?: number } | null>;
   persisted: () => Promise<boolean | null>;
+  /** Deletes a project's stem files (STEMS_FOLDER, projectStemPrefix). */
+  deleteStems: (projectId: string) => Promise<void>;
 }
 
 function realDeps(): StoreDeps {
@@ -96,6 +100,7 @@ function realDeps(): StoreDeps {
     },
     estimate: async () => (storage && typeof storage.estimate === 'function' ? storage.estimate() : null),
     persisted: async () => (storage && typeof storage.persisted === 'function' ? storage.persisted() : null),
+    deleteStems: (projectId) => deleteProjectStems(projectId),
   };
 }
 
@@ -172,6 +177,7 @@ export function createProjectStore(overrides?: Partial<StoreDeps>): ProjectStore
             finishedOnce: false,
             plan: emptyPlan(),
             columnsPerBeat: null,
+            stems: emptyStems(),
             tempoBpm: null,
           });
           await db.projects.put({ ...copy });
@@ -227,6 +233,7 @@ export function createProjectStore(overrides?: Partial<StoreDeps>): ProjectStore
             finishedOnce: false,
             plan: emptyPlan(),
             columnsPerBeat: null,
+            stems: emptyStems(),
           tempoBpm: null,
         });
         await db.transaction('rw', db.projects, db.artifacts, async () => {
@@ -270,6 +277,8 @@ export function createProjectStore(overrides?: Partial<StoreDeps>): ProjectStore
         if (others.length === 0) await db.artifacts.delete(p.peaksKey);
       });
       if (!p) return;
+      // Stems are the project's own (named after its id), never shared; a failure leaves files, not a broken delete.
+      await d.deleteStems(id).catch((e: unknown) => console.warn('Could not delete the stem files', e));
       if ((await db.projects.where('source.sha256').equals(p.source.sha256).count()) > 0) return;
       const names = sourceFileNames(p.source.sha256, p.source.ext);
       for (const name of [names.original, names.stereo, names.mono]) await d.opfs.deleteFile(SOURCES_FOLDER, name);
